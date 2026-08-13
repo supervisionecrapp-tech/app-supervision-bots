@@ -57,33 +57,47 @@ const COORDS = {
 // mes (ver firstIsoWeekOfMonth en isoWeek.mjs) — por eso agosto 2026
 // arranca en la semana 32, no la 31.
 //
-// dropdown/selectAll/yearChevron: calibradas en vivo el 2026-08-13 contra
-// una sesión recién logueada y CONFIRMADAS correctas en una corrida real
-// del bot (el año se expandió bien).
+// dropdown/selectAll/CHEVRON_X.year: calibradas en vivo el 2026-08-13
+// contra una sesión recién logueada y CONFIRMADAS correctas en una
+// corrida real del bot (el año se expandió bien).
 //
-// monthRowY/monthChevronX/weekCheckboxX/weekRowY: la primera versión de
-// estos números salió de escalar coordenadas medidas en una herramienta
-// de navegador distinta (con su propio reescalado interno de screenshots)
-// y quedó ~10px desalineada en Y — bastó para fallar el chevron angosto
-// del mes y en cambio marcar su checkbox (mes completo, no la semana).
-// Estos valores en cambio se midieron con precisión de píxel directo
-// sobre un screenshot REAL del bot (debug-03a-filtro-mes-expandido.png de
-// una corrida real): la fila de cada mes mide exactamente 23px, empezando
-// en y=228 para el mes 1. weekCheckboxX/weekRowY son estimados por
-// analogía (un nivel de indentación más que el mes, ~28px) — todavía no
-// verificados contra un screenshot real con semanas expandidas; revisar
-// debug-03-filtro-semana.png de la próxima corrida para confirmar.
+// ROW_HEIGHT/YEAR_ROW_Y0/CHEVRON_X.month/CHECKBOX_X.week: la primera
+// versión de estos números salió de escalar coordenadas medidas en una
+// herramienta de navegador distinta (con su propio reescalado interno de
+// screenshots) y quedó ~10px desalineada en Y — bastó para fallar el
+// chevron angosto del mes y en cambio marcar su checkbox (mes completo,
+// no la semana). Estos valores en cambio se midieron con precisión de
+// píxel directo sobre un screenshot REAL del bot
+// (debug-03a-filtro-mes-expandido.png de una corrida real): cada fila
+// mide exactamente 23px, la del año actual (colapsado) empieza en y=205.
+// CHECKBOX_X.week es estimado por analogía (un nivel de indentación más
+// que el mes, ~28px) — todavía no verificado contra un screenshot real
+// con semanas expandidas; revisar debug-03-filtro-semana.png de la
+// próxima corrida para confirmar. yearRowY(anio) para años != al actual
+// (ej. 2025) tampoco está probado en vivo todavía.
+// El árbol lista los años en orden descendente (año actual primero,
+// 2026 luego 2025 en las pruebas de hoy), cada uno como fila propia
+// COLAPSADA hasta que se expande — no anidados unos dentro de otros. La
+// fila del año actual siempre cae en yearRowY0 (medido), y cada año
+// anterior es una fila más abajo *mientras esté colapsado*. Esto
+// generaliza a años futuros también: no hay ningún "2026" hardcodeado,
+// se calcula relativo al año calendario real de hoy.
+const CHEVRON_X = { year: 1666, month: 1695 };
+const CHECKBOX_X = { week: 1750 };
+const ROW_HEIGHT = 23;
+const YEAR_ROW_Y0 = 205; // fila del año actual (calendario de HOY), colapsado
+
 const WEEK_FILTER = {
   dropdown: { x: 1843, y: 160 },
   selectAll: { x: 1688, y: 190 },
-  yearChevron: { x: 1666, y: 205 },
-  monthChevronX: 1695,
-  weekCheckboxX: 1750,
-  // Fila del mes N dentro del árbol ya expandido (año 2026 primero).
-  monthRowY: (mes) => 228 + (mes - 1) * 23,
+  // Fila del año `anio` en el árbol TODAVÍA COLAPSADO (antes de expandir
+  // ninguno) — cada año anterior al actual suma una fila.
+  yearRowY: (anio) => YEAR_ROW_Y0 + (new Date().getFullYear() - anio) * ROW_HEIGHT,
+  // Fila del mes N dentro del año ya expandido.
+  monthRowY: (anio, mes) => WEEK_FILTER.yearRowY(anio) + mes * ROW_HEIGHT,
   // Fila de la semana `weekIndex`-ésima (0-based) dentro del mes ya
-  // expandido — mismo alto de fila (23px), una fila por debajo del mes.
-  weekRowY: (mes, weekIndex) => WEEK_FILTER.monthRowY(mes) + 23 * (weekIndex + 1),
+  // expandido.
+  weekRowY: (anio, mes, weekIndex) => WEEK_FILTER.monthRowY(anio, mes) + ROW_HEIGHT * (weekIndex + 1),
 };
 
 // De Planta (nivel 0) a Sala: Planta > Oficina > Cadena > Bandera > Sala.
@@ -199,6 +213,11 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
 // necesario. Best-effort: probado en vivo solo para (2026, 8, 33) — el
 // screenshot "03-filtro-semana" de cada corrida es la forma de confirmar
 // que efectivamente marcó la semana correcta antes de confiar en el dato.
+// Para años/meses distintos al probado, ojo con el dropdown: tiene alto
+// fijo con scroll — si la semana buscada cae fuera del área visible (año
+// pasado + mes con varias semanas completas) el click todavía no hace
+// scroll para alcanzarla, así que puede fallar en silencio. Revisar
+// "03a-filtro-mes-expandido" si algo no calza.
 async function selectWeek(page, { anio, mes, semana }, downloadDir) {
   await page.mouse.click(WEEK_FILTER.dropdown.x, WEEK_FILTER.dropdown.y);
   await page.waitForTimeout(1000);
@@ -208,17 +227,18 @@ async function selectWeek(page, { anio, mes, semana }, downloadDir) {
   await page.mouse.click(WEEK_FILTER.selectAll.x, WEEK_FILTER.selectAll.y);
   await page.waitForTimeout(500);
 
-  await page.mouse.click(WEEK_FILTER.yearChevron.x, WEEK_FILTER.yearChevron.y);
+  const yearY = WEEK_FILTER.yearRowY(anio);
+  await page.mouse.click(CHEVRON_X.year, yearY);
   await page.waitForTimeout(500);
 
-  const monthY = WEEK_FILTER.monthRowY(mes);
-  await page.mouse.click(WEEK_FILTER.monthChevronX, monthY);
+  const monthY = WEEK_FILTER.monthRowY(anio, mes);
+  await page.mouse.click(CHEVRON_X.month, monthY);
   await page.waitForTimeout(500);
 
   const weekIndex = semana - firstIsoWeekOfMonth(anio, mes);
-  const weekY = WEEK_FILTER.weekRowY(mes, weekIndex);
+  const weekY = WEEK_FILTER.weekRowY(anio, mes, weekIndex);
   await debugShot(page, downloadDir, "03a-filtro-mes-expandido");
-  await page.mouse.click(WEEK_FILTER.weekCheckboxX, weekY);
+  await page.mouse.click(CHECKBOX_X.week, weekY);
   await page.waitForTimeout(1500);
   await debugShot(page, downloadDir, "03-filtro-semana");
 
