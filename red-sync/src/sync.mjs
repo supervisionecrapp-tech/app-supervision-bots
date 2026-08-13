@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { createClient } from "@supabase/supabase-js";
 import { scrapeRedExport } from "./scrape.mjs";
 import { uploadRedFile } from "./upload.mjs";
 import { getIsoWeek, isoWeekMonday } from "./isoWeek.mjs";
@@ -41,6 +42,7 @@ async function main() {
   const datawaltPass = requireEnv("DATAWALT_PASS");
   const supabaseUrl = process.env.SUPABASE_URL || "https://lbwwnrsbgaxjulpfbwdz.supabase.co";
   const supabaseServiceKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   // Configurable para que las dos corridas del martes (semana actual +
   // semana anterior) no se pisen las capturas de debug entre sí.
@@ -48,20 +50,58 @@ async function main() {
   mkdirSync(downloadDir, { recursive: true });
 
   console.log(`Sincronizando Red ${categoria} — año ${anio}, semana ${semana} (mes ${mes})`);
+  const startedAt = new Date().toISOString();
 
-  const filePath = await scrapeRedExport({
+  try {
+    const filePath = await scrapeRedExport({
+      categoria,
+      anio,
+      mes,
+      semana,
+      datawaltUser,
+      datawaltPass,
+      downloadDir,
+    });
+    console.log(`Archivo descargado: ${filePath}`);
+
+    const result = await uploadRedFile({ filePath, categoria, anio, semana, supabaseUrl, supabaseServiceKey });
+    console.log(`Listo: ${result.cargadas}/${result.total} filas cargadas (${result.descartadas} descartadas).`);
+
+    await logRun(supabase, { categoria, anio, mes, semana, startedAt, status: "success", filasCargadas: result.cargadas });
+  } catch (err) {
+    // Se registra el error en Supabase ANTES de relanzarlo — así el
+    // calendario del admin-panel muestra el día en rojo aunque el step
+    // de GitHub Actions también falle (lo cual queda igual, a propósito,
+    // para que la Action se vea roja y notifique).
+    await logRun(supabase, {
+      categoria,
+      anio,
+      mes,
+      semana,
+      startedAt,
+      status: "error",
+      errorMessage: String(err instanceof Error ? err.message : err).slice(0, 2000),
+    });
+    throw err;
+  }
+}
+
+async function logRun(supabase, { categoria, anio, mes, semana, startedAt, status, errorMessage, filasCargadas }) {
+  const { error } = await supabase.from("bot_runs").insert({
+    bot: "red-sync",
     categoria,
     anio,
     mes,
     semana,
-    datawaltUser,
-    datawaltPass,
-    downloadDir,
+    status,
+    error_message: errorMessage ?? null,
+    filas_cargadas: filasCargadas ?? null,
+    started_at: startedAt,
   });
-  console.log(`Archivo descargado: ${filePath}`);
-
-  const result = await uploadRedFile({ filePath, categoria, anio, semana, supabaseUrl, supabaseServiceKey });
-  console.log(`Listo: ${result.cargadas}/${result.total} filas cargadas (${result.descartadas} descartadas).`);
+  // No relanzar si falla el logging en sí — perder la fila del
+  // calendario es mucho menos grave que ocultar el error real de la
+  // corrida (que ya se relanza en el catch de main()).
+  if (error) console.error("No se pudo registrar la corrida en bot_runs:", error.message);
 }
 
 function requireEnv(name) {
