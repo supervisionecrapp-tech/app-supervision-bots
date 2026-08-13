@@ -1,18 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { scrapeRedExport } from "./scrape.mjs";
 import { uploadRedFile } from "./upload.mjs";
-
-// Misma fórmula que mobile/src/lib/isoWeek.ts (getIsoWeek) — el resto del
-// sistema (Red/Teamcore) ya usa esta convención para anio/semana, hay que
-// mantenerlas iguales.
-function getIsoWeek(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const semana = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return { anio: d.getUTCFullYear(), semana };
-}
+import { getIsoWeek } from "./isoWeek.mjs";
 
 function readArgs() {
   // Inputs de workflow_dispatch llegan como env vars (ver el .yml);

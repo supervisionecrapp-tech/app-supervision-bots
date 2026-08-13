@@ -11,6 +11,21 @@ export async function uploadRedFile({ filePath, categoria, anio, semana, supabas
   if (!ws) throw new Error(`El archivo no tiene una hoja "Export" (hojas: ${wb.SheetNames.join(", ")})`);
 
   const raw = XLSX.utils.sheet_to_json(ws, { defval: null });
+
+  // Guarda contra el modo de falla más peligroso del scraper: si el
+  // drill-down no llegó hasta el nivel Sala, el export sale igual pero
+  // agregado por Planta/Oficina/etc. Sin este chequeo eso entraría como
+  // "0 filas cargadas, N descartadas" y parecería un problema de cruce
+  // con la maestra en vez de un bot roto. Pasó de verdad: una corrida
+  // exportó las 7 filas de Planta creyendo que estaba en Sala.
+  const headers = Object.keys(raw[0] ?? {});
+  if (!headers.includes("Sala")) {
+    throw new Error(
+      `El export no está a nivel Sala — el drill-down del scraper falló. ` +
+        `Columnas encontradas: ${headers.join(", ")}`,
+    );
+  }
+
   // El export trae una fila "Total" y un bloque "Filtros aplicados..." al
   // final; ambas tienen Salas != 1 (cada local real trae exactamente 1).
   const rows = raw.filter((r) => r["Sala"] != null && r["Salas"] === 1);

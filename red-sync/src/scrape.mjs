@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { writeFileSync } from "node:fs";
+import { firstIsoWeekOfMonth } from "./isoWeek.mjs";
 
 // El reporte de Datawalt es Power BI embebido: se renderiza en
 // canvas/WebGL, no hay DOM accesible para los filtros/tablas/flechas de
@@ -14,12 +15,12 @@ export const VIEWPORT = { width: 1920, height: 889 };
 const REPORT_URLS = {
   // NARTD = "Reporte - Embonor Agencia". Calibrado y verificado esta sesión.
   NARTD: "https://dichter-neira.datawalt.app/report/736",
-  // ABI y VSR: reportes distintos en el mismo portal (vistos en el home
-  // como "Reporte - ABI Auditoría" / "Reporte - VSR Auditoría"), pero
-  // todavía no se abrieron ni se les sacó el report id real. Completar
-  // antes de usar categoria=ABI/VSR.
-  ABI: null,
-  VSR: null,
+  // Report IDs confirmados el 2026-08-13 (home del portal → cada tarjeta
+  // de reporte). Layout/coordenadas de RED>Detalle NO verificadas en
+  // estos dos todavía — probablemente calcen porque parecen la misma
+  // plantilla de reporte que NARTD, pero no asumir sin probar primero.
+  ABI: "https://dichter-neira.datawalt.app/report/750",
+  VSR: "https://dichter-neira.datawalt.app/report/754",
 };
 
 // Coordenadas calibradas a mano el 2026-08-13 contra el reporte NARTD
@@ -29,11 +30,47 @@ const REPORT_URLS = {
 const COORDS = {
   sidebarRed: { x: 136, y: 442 },
   tabDetalle: { x: 449, y: 147 },
-  drillDownArrow: { x: 1371, y: 585 },
+  // La barra del visual tiene 7 íconos: ↑ (1347) ↓ (1374) ↓↓ (1401)
+  // ⤋ (1430) ☰ (1466) ⧉ (1492) ⋯ (1522), todos en y≈587.
+  // OJO: el "↓" simple NO baja de nivel — es el toggle de modo drill de
+  // Power BI (se clickeó 4 veces en una corrida real y quedó todo en
+  // nivel Planta, encendiendo/apagando el modo). El que baja la tabla
+  // entera un nivel es el "↓↓" doble ("Ir al siguiente nivel de la
+  // jerarquía"), que además reemplaza el nivel en vez de anidarlo — por
+  // eso el export final trae solo la columna "Sala".
+  drillDownArrow: { x: 1401, y: 587 },
   exportMenuButton: { x: 1518, y: 585 },
   exportarDatosItem: { x: 1596, y: 606 },
   exportarConfirmButton: { x: 1157, y: 745 },
-  weekFilterDropdown: { x: 1843, y: 160 },
+};
+
+// Árbol de filtro Año>Mes>Semana, calibrado en vivo el 2026-08-13 contra
+// una sesión recién logueada (viewport 1568 de la herramienta de browser,
+// escalado ×SCALE a los 1920 reales del bot). Secuencia verificada a mano:
+//  1. Abrir el dropdown.
+//  2. El estado default de una sesión nueva viene con el AÑO actual ya
+//     marcado (ni "todo" ni "nada") — un click en "Seleccionar todo" lo
+//     COMPLETA a todo marcado; hace falta un SEGUNDO click para vaciarlo
+//     del todo y partir limpio. Contraintuitivo pero así se comporta.
+//  3. Expandir el año (chevron) → aparecen los meses 1..mes-actual.
+//  4. Expandir el mes buscado (chevron) → aparecen sus semanas.
+//  5. Marcar el checkbox de la semana buscada.
+// Las semanas se agrupan bajo el mes de SU LUNES, no el del día 1 del
+// mes (ver firstIsoWeekOfMonth en isoWeek.mjs) — por eso agosto 2026
+// arranca en la semana 32, no la 31.
+const SCALE = 1920 / 1568;
+const scaled = (x, y) => ({ x: Math.round(x * SCALE), y: Math.round(y * SCALE) });
+const WEEK_FILTER = {
+  dropdown: scaled(1505, 131),
+  selectAll: scaled(1379, 155),
+  yearChevron: scaled(1360, 174),
+  monthChevronX: Math.round(1381 * SCALE),
+  weekCheckboxX: Math.round(1428 * SCALE),
+  // Fila del mes N dentro del árbol ya expandido (año 2026 primero).
+  monthRowY: (mes) => Math.round((174 + mes * 19) * SCALE),
+  // Fila de la semana `weekIndex`-ésima (0-based) dentro del mes ya
+  // expandido.
+  weekRowY: (mes, weekIndex) => Math.round((174 + mes * 19 + 17 + weekIndex * 19) * SCALE),
 };
 
 // De Planta (nivel 0) a Sala: Planta > Oficina > Cadena > Bandera > Sala.
@@ -100,19 +137,7 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
     await page.waitForTimeout(8000);
     await debugShot(page, downloadDir, "02-red-detalle");
 
-    // TODO(calibrar): seleccionar año/mes/semana específicos en el árbol
-    // del filtro es la parte menos probada de todo el flujo — el árbol es
-    // canvas puro y su layout cambia según qué esté expandido. Para la
-    // corrida diaria (semana actual) el reporte YA viene con el año/mes
-    // actual expandido por default, así que de momento no se toca el
-    // filtro y se confía en el default. Si (anio, mes, semana) no
-    // coinciden con el default del reporte, esto va a traer datos de la
-    // semana equivocada sin avisar — hay que revisar el debug screenshot
-    // "03-filtro-semana" de cada corrida hasta que se generalice esto.
-    await page.mouse.click(COORDS.weekFilterDropdown.x, COORDS.weekFilterDropdown.y);
-    await page.waitForTimeout(800);
-    await debugShot(page, downloadDir, "03-filtro-semana");
-    await page.keyboard.press("Escape");
+    await selectWeek(page, { anio, mes, semana }, downloadDir);
 
     // Cada drill-down re-consulta el dataset y repinta la tabla entera.
     // Se deja un screenshot por nivel: si el bot termina exportando el
@@ -154,6 +179,38 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
   } finally {
     await browser.close();
   }
+}
+
+// Ver el comentario largo junto a WEEK_FILTER más arriba para la
+// secuencia completa y por qué el doble click en "Seleccionar todo" es
+// necesario. Best-effort: probado en vivo solo para (2026, 8, 33) — el
+// screenshot "03-filtro-semana" de cada corrida es la forma de confirmar
+// que efectivamente marcó la semana correcta antes de confiar en el dato.
+async function selectWeek(page, { anio, mes, semana }, downloadDir) {
+  await page.mouse.click(WEEK_FILTER.dropdown.x, WEEK_FILTER.dropdown.y);
+  await page.waitForTimeout(1000);
+
+  await page.mouse.click(WEEK_FILTER.selectAll.x, WEEK_FILTER.selectAll.y);
+  await page.waitForTimeout(500);
+  await page.mouse.click(WEEK_FILTER.selectAll.x, WEEK_FILTER.selectAll.y);
+  await page.waitForTimeout(500);
+
+  await page.mouse.click(WEEK_FILTER.yearChevron.x, WEEK_FILTER.yearChevron.y);
+  await page.waitForTimeout(500);
+
+  const monthY = WEEK_FILTER.monthRowY(mes);
+  await page.mouse.click(WEEK_FILTER.monthChevronX, monthY);
+  await page.waitForTimeout(500);
+
+  const weekIndex = semana - firstIsoWeekOfMonth(anio, mes);
+  const weekY = WEEK_FILTER.weekRowY(mes, weekIndex);
+  await debugShot(page, downloadDir, "03a-filtro-mes-expandido");
+  await page.mouse.click(WEEK_FILTER.weekCheckboxX, weekY);
+  await page.waitForTimeout(1500);
+  await debugShot(page, downloadDir, "03-filtro-semana");
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(500);
 }
 
 async function debugShot(page, dir, name) {
