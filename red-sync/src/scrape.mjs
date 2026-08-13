@@ -78,14 +78,26 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
     // El login puede redirigir directo al reporte (callbackUrl) o al home;
     // forzar la navegación al reporte de nuevo asegura que quedemos ahí.
     await page.goto(reportUrl);
-    await page.waitForTimeout(4000); // el embed de Power BI tarda en pintar
+    // El embed de Power BI (canvas/WebGL) tarda en pintar y no hay forma de
+    // esperarlo con un selector real. 4s alcanzaba en local pero en el
+    // runner de GitHub Actions todavía estaba mostrando el spinner de
+    // carga a los 4s (visto en debug-01-report-loaded de la corrida real)
+    // — el click de "RED" se perdía en el vacío mientras cargaba. 10s dio
+    // margen de sobra en esa misma corrida.
+    await page.waitForTimeout(10000);
 
     await debugShot(page, downloadDir, "01-report-loaded");
 
+    // Cada navegación dentro del reporte vuelve a renderizar todo el canvas
+    // desde cero — en el runner eso tarda bastante más que en local (se vio
+    // el panel todavía en blanco 1.5s después de entrar a RED). Estas
+    // esperas son generosas a propósito: el costo de esperar de más es
+    // trivial comparado con una corrida entera perdida por clickear antes
+    // de tiempo, que además falla de forma silenciosa.
     await page.mouse.click(COORDS.sidebarRed.x, COORDS.sidebarRed.y);
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(8000);
     await page.mouse.click(COORDS.tabDetalle.x, COORDS.tabDetalle.y);
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(8000);
     await debugShot(page, downloadDir, "02-red-detalle");
 
     // TODO(calibrar): seleccionar año/mes/semana específicos en el árbol
@@ -102,16 +114,27 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
     await debugShot(page, downloadDir, "03-filtro-semana");
     await page.keyboard.press("Escape");
 
+    // Cada drill-down re-consulta el dataset y repinta la tabla entera.
+    // Se deja un screenshot por nivel: si el bot termina exportando el
+    // nivel equivocado (Planta en vez de Sala), estas capturas dicen
+    // exactamente en qué paso se perdió el click.
     for (let i = 0; i < DRILL_DOWN_STEPS; i++) {
+      // Hover primero: la barra de herramientas del visual (donde vive la
+      // flecha) solo aparece cuando el mouse está sobre la tabla.
+      await page.mouse.move(COORDS.drillDownArrow.x, COORDS.drillDownArrow.y);
+      await page.waitForTimeout(500);
       await page.mouse.click(COORDS.drillDownArrow.x, COORDS.drillDownArrow.y);
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(4000);
+      await debugShot(page, downloadDir, `04-drill-${i + 1}`);
     }
-    await debugShot(page, downloadDir, "04-drill-down-sala");
 
-    await page.mouse.click(COORDS.exportMenuButton.x, COORDS.exportMenuButton.y);
+    await page.mouse.move(COORDS.exportMenuButton.x, COORDS.exportMenuButton.y);
     await page.waitForTimeout(500);
+    await page.mouse.click(COORDS.exportMenuButton.x, COORDS.exportMenuButton.y);
+    await page.waitForTimeout(1500);
+    await debugShot(page, downloadDir, "05a-menu-abierto");
     await page.mouse.click(COORDS.exportarDatosItem.x, COORDS.exportarDatosItem.y);
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(2500);
     await debugShot(page, downloadDir, "05-dialogo-exportar");
 
     const [download] = await Promise.all([
