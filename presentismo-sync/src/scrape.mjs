@@ -97,17 +97,27 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
     await page.waitForTimeout(10000);
     await debugShot(page, downloadDir, "02-report-loaded");
 
-    const startInput = page.locator('input[aria-label^="Fecha de inicio"]');
-    const endInput = page.locator('input[aria-label^="Fecha de finalización"]');
+    // El aria-label ("Fecha de inicio.../Fecha de finalización...") sale
+    // en el idioma de la sesión — confirmado que a veces es español y a
+    // veces inglés, igual que la pantalla de email. Se usa la clase CSS
+    // compartida (date-slicer-input, ver el HTML real que se inspeccionó
+    // a mano) y el orden en el DOM en vez del texto: primer input =
+    // inicio, segundo = fin.
+    const dateInputs = page.locator("input.date-slicer-input");
+    const startInput = dateInputs.nth(0);
+    const endInput = dateInputs.nth(1);
+
+    // A pedido explícito: siempre la fecha de FIN primero, después la de
+    // INICIO — si se hace al revés, Power BI puede rechazar el rango
+    // (fin quedando antes que el inicio ya cargado) o recalcular mal.
+    await endInput.click({ clickCount: 3 });
+    await endInput.fill(fechaStr);
+    await endInput.press("Tab");
+    await page.waitForTimeout(500);
 
     await startInput.click({ clickCount: 3 });
     await startInput.fill(fechaStr);
     await startInput.press("Tab");
-    await page.waitForTimeout(500);
-
-    await endInput.click({ clickCount: 3 });
-    await endInput.fill(fechaStr);
-    await endInput.press("Tab");
     await page.waitForTimeout(3000);
     await debugShot(page, downloadDir, "03-fecha-filtrada");
 
