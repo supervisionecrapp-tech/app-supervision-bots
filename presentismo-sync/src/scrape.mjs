@@ -122,6 +122,7 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
     await endInput.click({ clickCount: 3 });
     await endInput.fill(fechaStr);
     await closeDatePickerOverlay(page);
+    await debugShot(page, downloadDir, "03a-fecha-fin-cerrada");
 
     await startInput.click({ clickCount: 3 });
     await startInput.fill(fechaStr);
@@ -161,9 +162,13 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
 
 async function closeDatePickerOverlay(page) {
   await page.keyboard.press("Escape").catch(() => {});
-  // Click en una esquina neutra de la página — "click afuera" es lo que
-  // los overlays de Angular CDK esperan para cerrarse solos.
-  await page.mouse.click(10, 10).catch(() => {});
+  // Click en un punto vacío del reporte — "click afuera" es lo que los
+  // overlays de Angular CDK esperan para cerrarse solos. (10,10) parecía
+  // neutro pero en una corrida real pegó justo en el ícono de apps de
+  // Microsoft 365 del header y abrió ESE menú en vez de cerrar el
+  // calendario — (1200,450) cae en el espacio en blanco del reporte,
+  // lejos de cualquier ícono/botón del header o de los filtros.
+  await page.mouse.click(1200, 450).catch(() => {});
   await page.waitForSelector(".cdk-overlay-backdrop", { state: "detached", timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(300);
 }
