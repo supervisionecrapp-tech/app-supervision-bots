@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { writeFileSync } from "node:fs";
 
 // El reporte de Datawalt es Power BI embebido: se renderiza en
 // canvas/WebGL, no hay DOM accesible para los filtros/tablas/flechas de
@@ -48,6 +49,14 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
 
   try {
     await page.goto(`https://dichter-neira.datawalt.app/report/${reportUrl.split("/").pop()}`);
+    await page.waitForLoadState("networkidle").catch(() => {});
+
+    // Diagnóstico: si el login de más abajo falla, esto deja evidencia de
+    // qué página/estado real encontró el runner (podría ser un bloqueo
+    // anti-bot por IP de datacenter, un timing distinto al local, etc.)
+    await debugShot(page, downloadDir, "00-post-goto");
+    writeFileSync(`${downloadDir}/debug-00-post-goto.html`, await page.content());
+    console.log(`URL tras goto: ${page.url()}`);
 
     // Login (DOM real, no Power BI) — si el portal cambia el copy de los
     // placeholders esto rompe acá primero, es lo más fácil de arreglar.
@@ -103,6 +112,12 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
     const filePath = `${downloadDir}/red-${categoria}-${anio}-${semana}.xlsx`;
     await download.saveAs(filePath);
     return filePath;
+  } catch (err) {
+    // Screenshot de "dónde quedó pintada la página" en el momento exacto
+    // del error — sea cual sea el paso que falló, sin tener que agregar un
+    // debugShot manual en cada línea.
+    await debugShot(page, downloadDir, "99-error");
+    throw err;
   } finally {
     await browser.close();
   }

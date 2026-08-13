@@ -57,5 +57,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: debug-screenshots
-          path: red-sync/downloads/debug-*.png
+          path: |
+            red-sync/downloads/debug-*.png
+            red-sync/downloads/debug-*.html
           if-no-files-found: ignore
