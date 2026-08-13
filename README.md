@@ -47,8 +47,9 @@ archivo real todavía (`red-sync/src/scrape.mjs` y `redColumns.mjs`).
 ## presentismo-sync
 
 Corre vía [`.github/workflows/presentismo-sync.yml`](./.github/workflows/presentismo-sync.yml):
-diario, 10am Chile, siempre la fecha de hoy (o una fecha específica vía
-`workflow_dispatch`).
+cada 2 horas de 9:00 a 23:00 Chile (día actual), más una corrida especial
+a las 7:00 Chile que carga el día ANTERIOR completo. También soporta
+`workflow_dispatch` manual con una fecha específica.
 
 A diferencia de Datawalt, acá es Power BI Service real (no embebido) con
 login de Microsoft/Azure AD — sin MFA en la cuenta usada, así que el
