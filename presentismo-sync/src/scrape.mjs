@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 
-// bi.frax.com redirige directo a un login de Microsoft (Azure AD) y de
+// bi.frax.cl redirige directo a un login de Microsoft (Azure AD) y de
 // ahí a app.powerbi.com — es Power BI Service real (no embebido en un
 // portal de terceros como Datawalt), pero el motor de renderizado del
 // reporte es el mismo Power BI de siempre: mismo canvas para
@@ -34,7 +34,7 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
   const page = await context.newPage();
 
   try {
-    await page.goto("https://bi.frax.com");
+    await page.goto("https://bi.frax.cl");
     await page.waitForURL(/login\.microsoftonline\.com/, { timeout: 20000 });
     await debugShot(page, downloadDir, "00-login-ms");
 

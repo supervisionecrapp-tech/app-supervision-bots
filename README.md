@@ -7,7 +7,7 @@ admin-panel manual.
 - **[red-sync](./red-sync)** — Red (NARTD, hoy; ABI/VSR pendientes) desde
   el portal Datawalt (Dichter Neira Analytics).
 - **[presentismo-sync](./presentismo-sync)** — Marcaciones de Presentismo
-  WM desde Power BI Service (bi.frax.com / app.powerbi.com).
+  WM desde Power BI Service (bi.frax.cl / app.powerbi.com).
 
 Ambos loguean cada corrida (éxito o error) en la tabla `bot_runs` de
 Supabase — el admin-panel.html tiene un calendario que lee de ahí para
@@ -19,7 +19,7 @@ En `Settings → Secrets and variables → Actions` de este repo:
 
 - `DATAWALT_USER` / `DATAWALT_PASS` — credenciales del portal Datawalt (red-sync).
 - `FRAX_USER` / `FRAX_PASS` — credenciales de Microsoft/Azure AD para
-  bi.frax.com (presentismo-sync).
+  bi.frax.cl (presentismo-sync).
 - `SUPABASE_SERVICE_ROLE_KEY` — desde el dashboard de Supabase
   (Project Settings → API → `service_role`/`sb_secret_...`). Da acceso
   total, tratarla como una contraseña. Compartida por los dos bots.
