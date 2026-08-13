@@ -1,7 +1,8 @@
 import { chromium } from "playwright";
 
-// bi.frax.cl redirige directo a un login de Microsoft (Azure AD) y de
-// ahí a app.powerbi.com — es Power BI Service real (no embebido en un
+// bi.frax.cl pasa primero por una pantalla propia de Power BI pidiendo
+// el correo, y de ahí recién al login real de Microsoft (Azure AD) y a
+// app.powerbi.com — es Power BI Service real (no embebido en un
 // portal de terceros como Datawalt), pero el motor de renderizado del
 // reporte es el mismo Power BI de siempre: mismo canvas para
 // tablas/visuales, mismos data-testid en los botones de exportar
@@ -35,19 +36,19 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
 
   try {
     await page.goto("https://bi.frax.cl");
-    await page.waitForURL(/login\.microsoftonline\.com/, { timeout: 20000 });
-    await debugShot(page, downloadDir, "00-login-ms");
+    await page.waitForLoadState("networkidle").catch(() => {});
+    await debugShot(page, downloadDir, "00-post-goto");
 
-    // Confirmado en una corrida real: antes del login estándar de
-    // Microsoft, a veces aparece primero una pantalla con marca "Power
-    // BI" pidiendo el correo, con su propio botón de envío — es un paso
-    // previo, no el login en sí. El TEXTO cambia según el idioma de la
-    // sesión (se vio en inglés "Enter email"/"Submit" y en español
-    // "Escriba el correo electrónico"/"Enviar" en corridas distintas),
-    // por eso se usan los IDs (#email/#submitBtn), que no cambian.
-    // Opcional porque no está confirmado que aparezca siempre (podría
-    // depender de cookies previas del tenant), timeout corto para no
-    // frenar el flujo si esta vez no sale.
+    // Confirmado en una corrida real: bi.frax.cl NO redirige directo a
+    // login.microsoftonline.com — primero pasa por esta pantalla propia
+    // de Power BI (dominio distinto) pidiendo el correo, con su propio
+    // botón de envío. El TEXTO cambia según el idioma de la sesión (se
+    // vio en inglés "Enter email"/"Submit" y en español "Escriba el
+    // correo electrónico"/"Enviar" en corridas distintas), por eso se
+    // usan los IDs (#email/#submitBtn), que no cambian. Opcional porque
+    // no está confirmado que aparezca siempre (podría depender de
+    // cookies previas del tenant), timeout corto para no frenar el flujo
+    // si esta vez no sale.
     const pbiEmailInput = page.locator("#email");
     if (await pbiEmailInput.isVisible({ timeout: 5000 }).catch(() => false)) {
       await pbiEmailInput.fill(datawaltUser);
@@ -59,8 +60,11 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
     // Login estándar de Microsoft/Azure AD (sin MFA, confirmado por el
     // usuario) — dos pasos con el mismo botón "Siguiente"/"Iniciar
     // sesión" (id idSIButton9 en ambas pantallas). IDs estables y
-    // documentados de Microsoft, no específicos de este tenant.
-    await page.waitForSelector("#i0116", { timeout: 15000 });
+    // documentados de Microsoft, no específicos de este tenant. Ya no se
+    // exige la URL login.microsoftonline.com de antemano — con que
+    // aparezca el campo #i0116 alcanza, sea cual sea el dominio real.
+    await page.waitForSelector("#i0116", { timeout: 20000 });
+    await debugShot(page, downloadDir, "01-login-ms");
     await page.fill("#i0116", datawaltUser);
     await page.click("#idSIButton9");
     await page.waitForSelector("#i0118", { timeout: 15000 });
