@@ -34,7 +34,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 22+ trae WebSocket nativo — @supabase/supabase-js lo necesita
+          # para inicializar el cliente (aunque no usemos Realtime) y en
+          # Node 20 tira error al hacer createClient().
+          node-version: 22
 
       - run: npm install
       - run: npx playwright install --with-deps chromium
