@@ -1,0 +1,61 @@
+name: Red Sync
+
+on:
+  schedule:
+    # 09:00 America/Santiago. GitHub Actions cron es siempre UTC y no
+    # sigue horario de verano de Chile — Chile continental hoy no cambia
+    # de horario (hora única todo el año), así que UTC-4 fijo = 13:00 UTC.
+    # Si Chile vuelve a tener horario de verano, ajustar acá.
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+    inputs:
+      categoria:
+        description: "VSR | ABI | NARTD"
+        required: true
+        default: "NARTD"
+      anio:
+        description: "Año (vacío = usar semana actual)"
+        required: false
+      mes:
+        description: "Mes (vacío = usar mes actual)"
+        required: false
+      semana:
+        description: "Semana (vacío = usar semana actual)"
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: red-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+
+      - name: Sync Red
+        env:
+          CATEGORIA: ${{ github.event.inputs.categoria || 'NARTD' }}
+          ANIO: ${{ github.event.inputs.anio }}
+          MES: ${{ github.event.inputs.mes }}
+          SEMANA: ${{ github.event.inputs.semana }}
+          DATAWALT_USER: ${{ secrets.DATAWALT_USER }}
+          DATAWALT_PASS: ${{ secrets.DATAWALT_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync
+
+      # Se suben siempre (success() || failure()) porque las capturas de
+      # depuración son justamente para diagnosticar cuando algo falla.
+      - name: Subir capturas de debug
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: red-sync/downloads/debug-*.png
+          if-no-files-found: ignore
