@@ -38,10 +38,26 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
     await page.waitForURL(/login\.microsoftonline\.com/, { timeout: 20000 });
     await debugShot(page, downloadDir, "00-login-ms");
 
+    // Confirmado en una corrida real: antes del login estándar de
+    // Microsoft, a veces aparece primero una pantalla con marca "Power
+    // BI" pidiendo el correo ("Enter your work or school email...") con
+    // su propio botón "Submit" — es un paso previo, no el login en sí.
+    // Opcional porque no está confirmado que aparezca siempre (podría
+    // depender de cookies previas del tenant), timeout corto para no
+    // frenar el flujo si esta vez no sale.
+    const pbiEmailInput = page.getByPlaceholder("Enter email");
+    if (await pbiEmailInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await pbiEmailInput.fill(datawaltUser);
+      await page.getByRole("button", { name: "Submit" }).click();
+      await page.waitForTimeout(2000);
+      await debugShot(page, downloadDir, "00b-post-email-submit");
+    }
+
     // Login estándar de Microsoft/Azure AD (sin MFA, confirmado por el
     // usuario) — dos pasos con el mismo botón "Siguiente"/"Iniciar
     // sesión" (id idSIButton9 en ambas pantallas). IDs estables y
     // documentados de Microsoft, no específicos de este tenant.
+    await page.waitForSelector("#i0116", { timeout: 15000 });
     await page.fill("#i0116", datawaltUser);
     await page.click("#idSIButton9");
     await page.waitForSelector("#i0118", { timeout: 15000 });
