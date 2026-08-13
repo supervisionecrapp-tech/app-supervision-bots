@@ -1,0 +1,45 @@
+name: Presentismo Sync
+
+on:
+  schedule:
+    # Diario, 10:00 America/Santiago = 14:00 UTC (sin horario de verano
+    # en Chile continental — ver la misma nota en red-sync.yml).
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      fecha:
+        description: "YYYY-MM-DD (vacío = hoy)"
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: presentismo-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+
+      - name: Sync Presentismo
+        env:
+          FECHA: ${{ github.event.inputs.fecha }}
+          FRAX_USER: ${{ secrets.FRAX_USER }}
+          FRAX_PASS: ${{ secrets.FRAX_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync
+
+      - name: Subir capturas de debug
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots-presentismo
+          path: |
+            presentismo-sync/downloads/debug-*.png
+          if-no-files-found: ignore
