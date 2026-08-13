@@ -112,18 +112,20 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
     // (fin quedando antes que el inicio ya cargado) o recalcular mal.
     //
     // Confirmado en una corrida real: el click abre un mini-calendario
-    // visual que tapa el resto de los filtros — hay que ESCRIBIR la
-    // fecha (fill), no elegirla clickeando un día, y cerrar el
-    // calendario con Escape en vez de Tab (Tab puede quedarse navegando
-    // adentro del calendario en vez de salir de él).
+    // (overlay de Angular CDK) que tapa el resto de los filtros — hay que
+    // ESCRIBIR la fecha (fill), no elegirla clickeando un día. Un simple
+    // Escape no alcanza para cerrarlo del todo: queda un
+    // ".cdk-overlay-backdrop" invisible pero activo tapando toda la
+    // pantalla, que bloquea el click sobre el siguiente campo
+    // ("intercepts pointer events"). Hay que esperar a que ese backdrop
+    // realmente desaparezca del DOM antes de seguir.
     await endInput.click({ clickCount: 3 });
     await endInput.fill(fechaStr);
-    await endInput.press("Escape");
-    await page.waitForTimeout(500);
+    await closeDatePickerOverlay(page);
 
     await startInput.click({ clickCount: 3 });
     await startInput.fill(fechaStr);
-    await startInput.press("Escape");
+    await closeDatePickerOverlay(page);
     await page.waitForTimeout(3000);
     await debugShot(page, downloadDir, "03-fecha-filtrada");
 
@@ -155,6 +157,15 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
   } finally {
     await browser.close();
   }
+}
+
+async function closeDatePickerOverlay(page) {
+  await page.keyboard.press("Escape").catch(() => {});
+  // Click en una esquina neutra de la página — "click afuera" es lo que
+  // los overlays de Angular CDK esperan para cerrarse solos.
+  await page.mouse.click(10, 10).catch(() => {});
+  await page.waitForSelector(".cdk-overlay-backdrop", { state: "detached", timeout: 3000 }).catch(() => {});
+  await page.waitForTimeout(300);
 }
 
 async function debugShot(page, dir, name) {
