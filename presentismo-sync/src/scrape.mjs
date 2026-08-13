@@ -110,14 +110,20 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
     // A pedido explícito: siempre la fecha de FIN primero, después la de
     // INICIO — si se hace al revés, Power BI puede rechazar el rango
     // (fin quedando antes que el inicio ya cargado) o recalcular mal.
+    //
+    // Confirmado en una corrida real: el click abre un mini-calendario
+    // visual que tapa el resto de los filtros — hay que ESCRIBIR la
+    // fecha (fill), no elegirla clickeando un día, y cerrar el
+    // calendario con Escape en vez de Tab (Tab puede quedarse navegando
+    // adentro del calendario en vez de salir de él).
     await endInput.click({ clickCount: 3 });
     await endInput.fill(fechaStr);
-    await endInput.press("Tab");
+    await endInput.press("Escape");
     await page.waitForTimeout(500);
 
     await startInput.click({ clickCount: 3 });
     await startInput.fill(fechaStr);
-    await startInput.press("Tab");
+    await startInput.press("Escape");
     await page.waitForTimeout(3000);
     await debugShot(page, downloadDir, "03-fecha-filtrada");
 
