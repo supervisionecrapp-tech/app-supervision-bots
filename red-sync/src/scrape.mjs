@@ -58,11 +58,21 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
     writeFileSync(`${downloadDir}/debug-00-post-goto.html`, await page.content());
     console.log(`URL tras goto: ${page.url()}`);
 
-    // Login (DOM real, no Power BI) — si el portal cambia el copy de los
-    // placeholders esto rompe acá primero, es lo más fácil de arreglar.
-    await page.getByPlaceholder("Correo").fill(datawaltUser);
-    await page.getByPlaceholder("Contraseña").fill(datawaltPass);
-    await page.getByRole("button", { name: /iniciar sesión/i }).click();
+    // Login real (verificado en vivo el 2026-08-13, no adivinado): son DOS
+    // pasos, no uno.
+    // 1) login.datawalt.app muestra una pantalla de bienvenida con un solo
+    //    botón "Iniciar sesión" (sin accessible name, pero es el único
+    //    <button> de la página).
+    // 2) Ese botón redirige a un dominio TOTALMENTE distinto — AWS Cognito
+    //    Hosted UI (datawalt-app.auth.us-east-1.amazoncognito.com) — que es
+    //    donde están los campos reales: placeholders "Ingrese el nombre de
+    //    usuario" / "Ingrese la contraseña", no "Correo"/"Contraseña".
+    await page.getByText("Iniciar sesión", { exact: true }).click();
+    await page.waitForURL(/amazoncognito\.com/, { timeout: 15000 });
+
+    await page.getByPlaceholder("Ingrese el nombre de usuario").fill(datawaltUser);
+    await page.getByPlaceholder("Ingrese la contraseña").fill(datawaltPass);
+    await page.locator('button[type="submit"]').click();
     await page.waitForLoadState("networkidle");
 
     // El login puede redirigir directo al reporte (callbackUrl) o al home;
