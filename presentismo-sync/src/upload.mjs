@@ -32,7 +32,15 @@ export async function uploadPresentismoFile({ filePath, supabaseUrl, supabaseSer
 
   const rows = raw
     .map((r) => ({ ...r, _entrada: parseFechaHora(r["ENTRADA"]), _salida: parseFechaHora(r["SALIDA"]) }))
-    .filter((r) => r._entrada !== null && r["LOCAL"] != null && r["RUT PERSONA"]);
+    .filter(
+      (r) =>
+        r._entrada !== null &&
+        r["LOCAL"] != null &&
+        r["RUT PERSONA"] &&
+        // Formato SBA se descarta a pedido explícito — no corresponde a
+        // las salas que trackea Presentismo WM.
+        cleanText(r["FORMATO"])?.toUpperCase() !== "SBA",
+    );
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
