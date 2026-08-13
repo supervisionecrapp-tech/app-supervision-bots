@@ -44,9 +44,7 @@ const COORDS = {
   exportarConfirmButton: { x: 1157, y: 745 },
 };
 
-// Árbol de filtro Año>Mes>Semana, calibrado en vivo el 2026-08-13 contra
-// una sesión recién logueada (viewport 1568 de la herramienta de browser,
-// escalado ×SCALE a los 1920 reales del bot). Secuencia verificada a mano:
+// Árbol de filtro Año>Mes>Semana. Secuencia verificada en vivo:
 //  1. Abrir el dropdown.
 //  2. El estado default de una sesión nueva viene con el AÑO actual ya
 //     marcado (ni "todo" ni "nada") — un click en "Seleccionar todo" lo
@@ -58,19 +56,34 @@ const COORDS = {
 // Las semanas se agrupan bajo el mes de SU LUNES, no el del día 1 del
 // mes (ver firstIsoWeekOfMonth en isoWeek.mjs) — por eso agosto 2026
 // arranca en la semana 32, no la 31.
-const SCALE = 1920 / 1568;
-const scaled = (x, y) => ({ x: Math.round(x * SCALE), y: Math.round(y * SCALE) });
+//
+// dropdown/selectAll/yearChevron: calibradas en vivo el 2026-08-13 contra
+// una sesión recién logueada y CONFIRMADAS correctas en una corrida real
+// del bot (el año se expandió bien).
+//
+// monthRowY/monthChevronX/weekCheckboxX/weekRowY: la primera versión de
+// estos números salió de escalar coordenadas medidas en una herramienta
+// de navegador distinta (con su propio reescalado interno de screenshots)
+// y quedó ~10px desalineada en Y — bastó para fallar el chevron angosto
+// del mes y en cambio marcar su checkbox (mes completo, no la semana).
+// Estos valores en cambio se midieron con precisión de píxel directo
+// sobre un screenshot REAL del bot (debug-03a-filtro-mes-expandido.png de
+// una corrida real): la fila de cada mes mide exactamente 23px, empezando
+// en y=228 para el mes 1. weekCheckboxX/weekRowY son estimados por
+// analogía (un nivel de indentación más que el mes, ~28px) — todavía no
+// verificados contra un screenshot real con semanas expandidas; revisar
+// debug-03-filtro-semana.png de la próxima corrida para confirmar.
 const WEEK_FILTER = {
-  dropdown: scaled(1505, 131),
-  selectAll: scaled(1379, 155),
-  yearChevron: scaled(1360, 174),
-  monthChevronX: Math.round(1381 * SCALE),
-  weekCheckboxX: Math.round(1428 * SCALE),
+  dropdown: { x: 1843, y: 160 },
+  selectAll: { x: 1688, y: 190 },
+  yearChevron: { x: 1666, y: 205 },
+  monthChevronX: 1695,
+  weekCheckboxX: 1750,
   // Fila del mes N dentro del árbol ya expandido (año 2026 primero).
-  monthRowY: (mes) => Math.round((174 + mes * 19) * SCALE),
+  monthRowY: (mes) => 228 + (mes - 1) * 23,
   // Fila de la semana `weekIndex`-ésima (0-based) dentro del mes ya
-  // expandido.
-  weekRowY: (mes, weekIndex) => Math.round((174 + mes * 19 + 17 + weekIndex * 19) * SCALE),
+  // expandido — mismo alto de fila (23px), una fila por debajo del mes.
+  weekRowY: (mes, weekIndex) => WEEK_FILTER.monthRowY(mes) + 23 * (weekIndex + 1),
 };
 
 // De Planta (nivel 0) a Sala: Planta > Oficina > Cadena > Bandera > Sala.
