@@ -99,20 +99,33 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
 
     await selectWeek(frame, page, { anio, mes, semana }, downloadDir);
 
+    // El .vcHeader que contiene estos botones tiene tamaño CERO hasta que
+    // el mouse pasa sobre la visualización entera (la tabla) — es un
+    // hover-reveal atado al contenedor, no al botón. drillDownBtn.hover()
+    // no lo dispara porque el botón no tiene bounding box todavía cuando
+    // Playwright intenta ubicarlo. La solución es mover el mouse real a un
+    // punto amplio dentro de la tabla (coordenada de página, no del
+    // iframe — funciona igual que antes porque page.screenshot() ya
+    // captura el iframe compuesto en coordenadas de página) y RECIÉN
+    // ahí clickear por selector.
+    const TABLE_AREA = { x: 700, y: 650 };
+
     // Cada drill-down re-consulta el dataset y repinta la tabla entera.
     // Se deja un screenshot por nivel: si el bot termina exportando el
     // nivel equivocado (Planta en vez de Sala), estas capturas dicen
     // exactamente en qué paso se perdió el click.
     const drillDownBtn = frame.locator('[data-testid="drill-down-level-btn"]');
     for (let i = 0; i < DRILL_DOWN_STEPS; i++) {
-      await drillDownBtn.hover();
+      await page.mouse.move(TABLE_AREA.x, TABLE_AREA.y);
+      await page.waitForTimeout(300);
       await drillDownBtn.click();
       await page.waitForTimeout(4000);
       await debugShot(page, downloadDir, `04-drill-${i + 1}`);
     }
 
     const moreOptionsBtn = frame.locator('[data-testid="visual-more-options-btn"]');
-    await moreOptionsBtn.hover();
+    await page.mouse.move(TABLE_AREA.x, TABLE_AREA.y);
+    await page.waitForTimeout(300);
     await moreOptionsBtn.click();
     await page.waitForTimeout(1500);
     await debugShot(page, downloadDir, "05a-menu-abierto");
