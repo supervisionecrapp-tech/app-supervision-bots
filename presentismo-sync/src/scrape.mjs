@@ -132,15 +132,24 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
 
     // Igual que en red-sync: la barra de herramientas del visual (donde
     // vive "Más opciones") tiene tamaño cero hasta que el mouse pasa
-    // sobre la tabla completa.
-    const moreOptionsBtn = page.locator('[data-testid="visual-more-options-btn"]');
+    // sobre la tabla completa. Esta página tiene DOS visuales con el
+    // mismo botón (la tabla resumen "PROVEEDOR" arriba, que sí tiene
+    // drill, y la tabla plana de detalle abajo, que es la que
+    // necesitamos) — confirmado en una corrida real que el selector sin
+    // scope encuentra ambos (strict mode violation). El segundo match
+    // (nth(1)) es el de la tabla plana (el texto de accesibilidad del
+    // primero menciona "Drill on/Rows/Columns", el segundo no).
+    const moreOptionsBtn = page.locator('[data-testid="visual-more-options-btn"]').nth(1);
     await page.mouse.move(TABLE_AREA.x, TABLE_AREA.y);
     await page.waitForTimeout(300);
     await moreOptionsBtn.click();
     await page.waitForTimeout(1500);
     await debugShot(page, downloadDir, "04-menu-abierto");
 
-    await page.locator('[data-testid="pbimenu-item.Exportar datos"]').click();
+    // El texto del ítem del menú cambia de idioma igual que todo lo
+    // demás en esta sesión ("Exportar datos" en español, "Export data"
+    // en inglés) — se usa el ícono (pbi-glyph-export), que no cambia.
+    await page.locator(".pbi-menu-item").filter({ has: page.locator(".pbi-glyph-export") }).click();
     await page.waitForTimeout(2500);
     await debugShot(page, downloadDir, "05-dialogo-exportar");
 
