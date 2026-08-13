@@ -58,16 +58,22 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
     }
 
     // Login estándar de Microsoft/Azure AD (sin MFA, confirmado por el
-    // usuario) — dos pasos con el mismo botón "Siguiente"/"Iniciar
-    // sesión" (id idSIButton9 en ambas pantallas). IDs estables y
-    // documentados de Microsoft, no específicos de este tenant. Ya no se
-    // exige la URL login.microsoftonline.com de antemano — con que
-    // aparezca el campo #i0116 alcanza, sea cual sea el dominio real.
-    await page.waitForSelector("#i0116", { timeout: 20000 });
+    // usuario) — mismo botón "Siguiente"/"Iniciar sesión" (id
+    // idSIButton9) en todas las pantallas. IDs estables y documentados
+    // de Microsoft, no específicos de este tenant.
+    //
+    // Confirmado en una corrida real: como el correo ya se mandó en el
+    // paso anterior (pantalla de Power BI), Azure AD reconoce la cuenta
+    // y salta DIRECTO a "Enter password" — el campo de correo (#i0116)
+    // nunca aparece. Por eso se espera cualquiera de los dos (#i0116 o
+    // #i0118) en vez de asumir que #i0116 siempre está.
+    await page.waitForSelector("#i0116, #i0118", { timeout: 20000 });
     await debugShot(page, downloadDir, "01-login-ms");
-    await page.fill("#i0116", datawaltUser);
-    await page.click("#idSIButton9");
-    await page.waitForSelector("#i0118", { timeout: 15000 });
+    if (await page.locator("#i0116").isVisible().catch(() => false)) {
+      await page.fill("#i0116", datawaltUser);
+      await page.click("#idSIButton9");
+      await page.waitForSelector("#i0118", { timeout: 15000 });
+    }
     await page.fill("#i0118", datawaltPass);
     await page.click("#idSIButton9");
 
