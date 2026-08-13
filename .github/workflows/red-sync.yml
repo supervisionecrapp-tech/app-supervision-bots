@@ -2,11 +2,13 @@ name: Red Sync
 
 on:
   schedule:
-    # 09:00 America/Santiago. GitHub Actions cron es siempre UTC y no
-    # sigue horario de verano de Chile — Chile continental hoy no cambia
-    # de horario (hora única todo el año), así que UTC-4 fijo = 13:00 UTC.
-    # Si Chile vuelve a tener horario de verano, ajustar acá.
-    - cron: "0 13 * * *"
+    # Martes, jueves y domingo a las 10:00 America/Santiago. GitHub
+    # Actions cron es siempre UTC y no seguía horario de verano de Chile
+    # — Chile continental hoy tiene hora única todo el año (UTC-4 fijo),
+    # así que 10:00 Chile = 14:00 UTC. Si Chile vuelve a tener horario de
+    # verano, ajustar este offset.
+    # Día de la semana en cron: 0=domingo, 2=martes, 4=jueves.
+    - cron: "0 14 * * 0,2,4"
   workflow_dispatch:
     inputs:
       categoria:
@@ -42,12 +44,36 @@ jobs:
       - run: npm install
       - run: npx playwright install --with-deps chromium
 
-      - name: Sync Red
+      # El cron corre a las 14:00 UTC = 10:00 Chile del MISMO día
+      # calendario (no cruza medianoche), así que el día de la semana en
+      # el runner (UTC) coincide con el día real en Chile — no hace falta
+      # convertir zona horaria para esta comparación.
+      - name: Detectar día de la semana
+        id: day
+        run: echo "dow=$(date +%u)" >> "$GITHUB_OUTPUT" # 1=lunes … 7=domingo
+
+      - name: "Sync Red — semana actual"
         env:
           CATEGORIA: ${{ github.event.inputs.categoria || 'NARTD' }}
           ANIO: ${{ github.event.inputs.anio }}
           MES: ${{ github.event.inputs.mes }}
           SEMANA: ${{ github.event.inputs.semana }}
+          DOWNLOAD_DIR: ./downloads-actual
+          DATAWALT_USER: ${{ secrets.DATAWALT_USER }}
+          DATAWALT_PASS: ${{ secrets.DATAWALT_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync
+
+      # Solo los martes programados (no en corridas manuales) también se
+      # recarga la semana anterior completa, reemplazando lo que ya
+      # estaba cargado — el upsert de uploadRedFile ya hace ese reemplazo
+      # por (sala_id, año, semana), no hace falta borrar nada antes.
+      - name: "Sync Red — semana anterior (solo martes)"
+        if: github.event_name == 'schedule' && steps.day.outputs.dow == '2'
+        env:
+          CATEGORIA: NARTD
+          WEEKS_BACK: "1"
+          DOWNLOAD_DIR: ./downloads-anterior
           DATAWALT_USER: ${{ secrets.DATAWALT_USER }}
           DATAWALT_PASS: ${{ secrets.DATAWALT_PASS }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -61,6 +87,8 @@ jobs:
         with:
           name: debug-screenshots
           path: |
-            red-sync/downloads/debug-*.png
-            red-sync/downloads/debug-*.html
+            red-sync/downloads-actual/debug-*.png
+            red-sync/downloads-actual/debug-*.html
+            red-sync/downloads-anterior/debug-*.png
+            red-sync/downloads-anterior/debug-*.html
           if-no-files-found: ignore
