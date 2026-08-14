@@ -2,13 +2,12 @@ name: Red Sync
 
 on:
   schedule:
-    # Martes, jueves y domingo a las 10:00 America/Santiago. GitHub
-    # Actions cron es siempre UTC y no seguía horario de verano de Chile
-    # — Chile continental hoy tiene hora única todo el año (UTC-4 fijo),
-    # así que 10:00 Chile = 14:00 UTC. Si Chile vuelve a tener horario de
-    # verano, ajustar este offset.
-    # Día de la semana en cron: 0=domingo, 2=martes, 4=jueves.
-    - cron: "0 14 * * 0,2,4"
+    # TODOS los días a las 11:00 America/Santiago = 15:00 UTC (Chile
+    # continental tiene hora única todo el año, sin horario de verano —
+    # si eso cambia, ajustar este offset). Los martes, además, se sigue
+    # recargando la semana anterior completa (ver el paso "Sync Red —
+    # semana anterior" más abajo, sigue detectando martes por su cuenta).
+    - cron: "0 15 * * *"
   workflow_dispatch:
     inputs:
       categoria:

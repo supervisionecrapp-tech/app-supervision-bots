@@ -31,9 +31,12 @@ En `Settings → Secrets and variables → Actions` de este repo:
 ## red-sync
 
 Corre vía [`.github/workflows/red-sync.yml`](./.github/workflows/red-sync.yml):
-martes/jueves/domingo 10am Chile (semana actual), y los **martes además**
-recarga la semana anterior completa (reemplaza lo ya cargado). También
-soporta `workflow_dispatch` manual con categoría/año/mes/semana específicos.
+**todos los días 11am Chile** (semana actual, las 3 categorías NARTD+ABI+VSR en
+paralelo), y los **martes además** recarga la semana anterior completa
+(reemplaza lo ya cargado). También soporta `workflow_dispatch` manual — el
+dropdown "categoria" limita esa corrida a una sola categoría (default NARTD);
+para probar las 3 a mano hay que correr "Run workflow" tres veces, una por
+categoría.
 
 El reporte vive en un `<iframe src="app.powerbi.com">` dentro de Datawalt
 (Power BI Embedded, cross-origin) — el bot usa `page.frameLocator()` para
