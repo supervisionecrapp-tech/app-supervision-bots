@@ -41,7 +41,7 @@ jobs:
           if [ "${{ github.event_name }}" = "schedule" ]; then
             echo 'categorias=["NARTD","ABI","VSR"]' >> "$GITHUB_OUTPUT"
           else
-            echo 'categorias=["${{ github.event.inputs.categoria || ''NARTD'' }}"]' >> "$GITHUB_OUTPUT"
+            echo 'categorias=["${{ github.event.inputs.categoria || 'NARTD' }}"]' >> "$GITHUB_OUTPUT"
           fi
 
   sync:
