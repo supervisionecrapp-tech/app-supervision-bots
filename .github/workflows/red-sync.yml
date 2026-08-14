@@ -26,8 +26,31 @@ on:
         required: false
 
 jobs:
-  sync:
+  # Las corridas programadas (cron) sincronizan las 3 categorías; una
+  # corrida manual (workflow_dispatch) solo hace la que se elija en el
+  # input. Este job arma la lista según de dónde vino el disparo, y el
+  # job de abajo la usa como matrix para correr una por categoría en
+  # paralelo.
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      categorias: ${{ steps.set.outputs.categorias }}
+    steps:
+      - id: set
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo 'categorias=["NARTD","ABI","VSR"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'categorias=["${{ github.event.inputs.categoria || ''NARTD'' }}"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  sync:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        categoria: ${{ fromJson(needs.setup.outputs.categorias) }}
     defaults:
       run:
         working-directory: red-sync
@@ -54,7 +77,7 @@ jobs:
 
       - name: "Sync Red — semana actual"
         env:
-          CATEGORIA: ${{ github.event.inputs.categoria || 'NARTD' }}
+          CATEGORIA: ${{ matrix.categoria }}
           ANIO: ${{ github.event.inputs.anio }}
           MES: ${{ github.event.inputs.mes }}
           SEMANA: ${{ github.event.inputs.semana }}
@@ -65,13 +88,14 @@ jobs:
         run: npm run sync
 
       # Solo los martes programados (no en corridas manuales) también se
-      # recarga la semana anterior completa, reemplazando lo que ya
-      # estaba cargado — el upsert de uploadRedFile ya hace ese reemplazo
-      # por (sala_id, año, semana), no hace falta borrar nada antes.
+      # recarga la semana anterior completa, para las 3 categorías —
+      # reemplaza lo que ya estaba cargado (el upsert de uploadRedFile ya
+      # hace ese reemplazo por sala_id+año+semana, no hace falta borrar
+      # nada antes).
       - name: "Sync Red — semana anterior (solo martes)"
         if: github.event_name == 'schedule' && steps.day.outputs.dow == '2'
         env:
-          CATEGORIA: NARTD
+          CATEGORIA: ${{ matrix.categoria }}
           WEEKS_BACK: "1"
           DOWNLOAD_DIR: ./downloads-anterior
           DATAWALT_USER: ${{ secrets.DATAWALT_USER }}
@@ -81,11 +105,13 @@ jobs:
 
       # Se suben siempre (success() || failure()) porque las capturas de
       # depuración son justamente para diagnosticar cuando algo falla.
+      # Un nombre por categoría porque con matrix corren 3 jobs en
+      # paralelo y un artifact compartido pisaría los de los otros.
       - name: Subir capturas de debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-screenshots
+          name: debug-screenshots-${{ matrix.categoria }}
           path: |
             red-sync/downloads-actual/debug-*.png
             red-sync/downloads-actual/debug-*.html
