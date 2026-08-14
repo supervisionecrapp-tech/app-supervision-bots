@@ -74,14 +74,16 @@ async function login(jar, usuario, clave) {
   // sesión responde 302 a ".../login/?next=...") — no alcanza con mirar
   // el status code solo.
   const location = loginRes.headers.get("location") || "";
+  console.log(`Login POST → status ${loginRes.status}, location "${location}", cookies: [${Object.keys(jar).join(", ")}]`);
   if (loginRes.status !== 302 || location.includes("/ejecuciones/login/")) {
     throw new Error(
       `Login falló (usuario/contraseña inválidos, o TEAMCORE_USER/TEAMCORE_PASS mal configurados) — status ${loginRes.status}, location "${location}"`,
     );
   }
-  if (!jar.sessionid) {
-    throw new Error("Login pareció redirigir OK pero no se recibió cookie sessionid — no se puede continuar autenticado");
-  }
+  // No se asume un nombre de cookie de sesión específico (podría no
+  // llamarse "sessionid" en este deploy de Django) — la verificación real
+  // de que la sesión quedó autenticada es este GET de abajo, no el
+  // nombre del cookie.
 
   // Verificación extra: confirmar que la sesión realmente quedó
   // autenticada antes de seguir, en vez de descubrirlo recién en el paso
