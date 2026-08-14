@@ -121,7 +121,7 @@ export async function scrapeRedExport({
     await page.waitForTimeout(8000 * waitMultiplier);
     await debugShot(page, downloadDir, "02-red-detalle");
 
-    await selectWeek(frame, page, { anio, mes, semana }, downloadDir);
+    await selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitMultiplier);
 
     // El .vcHeader que contiene estos botones tiene tamaño CERO hasta que
     // el mouse pasa sobre la visualización entera (la tabla) — es un
@@ -157,20 +157,22 @@ export async function scrapeRedExport({
       const puedeColapsar = await drillUpBtn.isEnabled().catch(() => false);
       if (!puedeColapsar) break;
       await drillUpBtn.click();
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(1500 * waitMultiplier);
     }
     await debugShot(page, downloadDir, "03b-colapsado");
 
-    // Cada drill-down re-consulta el dataset y repinta la tabla entera.
-    // Se deja un screenshot por nivel: si el bot termina exportando el
-    // nivel equivocado (Planta en vez de Sala), estas capturas dicen
-    // exactamente en qué paso se perdió el click.
+    // Cada drill-down re-consulta el dataset y repinta la tabla entera —
+    // misma lógica que la espera de carga inicial: escala con
+    // waitMultiplier porque también es "esperar a que cargue el panel",
+    // no un click puntual. Se deja un screenshot por nivel: si el bot
+    // termina exportando el nivel equivocado (Planta en vez de Sala),
+    // estas capturas dicen exactamente en qué paso se perdió el click.
     const drillDownBtn = frame.locator('[data-testid="drill-down-level-btn"]');
     for (let i = 0; i < DRILL_DOWN_STEPS; i++) {
       await page.mouse.move(TABLE_AREA.x, TABLE_AREA.y);
       await page.waitForTimeout(300);
       await drillDownBtn.click();
-      await page.waitForTimeout(4000);
+      await page.waitForTimeout(4000 * waitMultiplier);
       await debugShot(page, downloadDir, `04-drill-${i + 1}`);
     }
 
@@ -233,32 +235,32 @@ export async function scrapeRedExport({
 // en la semana 32, no la 31.
 const WEEK_FILTER_DROPDOWN = { x: 1843, y: 160 };
 
-async function selectWeek(frame, page, { anio, mes, semana }, downloadDir) {
+async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitMultiplier = 1) {
   await page.mouse.click(WEEK_FILTER_DROPDOWN.x, WEEK_FILTER_DROPDOWN.y);
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(1000 * waitMultiplier);
 
   const selectAll = frame.locator('.slicerItemContainer[title="Seleccionar todo"] .slicerCheckbox');
   await selectAll.click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(500 * waitMultiplier);
   await selectAll.click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(500 * waitMultiplier);
 
   const yearItem = frame.locator(`.slicerItemContainer[title="${anio}"][aria-level="1"]`);
   await yearItem.locator(".expandButton").click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(500 * waitMultiplier);
 
   const monthItem = frame.locator(`.slicerItemContainer[title="${mes}"][aria-level="2"]`);
   await monthItem.locator(".expandButton").click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(500 * waitMultiplier);
   await debugShot(page, downloadDir, "03a-filtro-mes-expandido");
 
   const weekItem = frame.locator(`.slicerItemContainer[title="${semana}"][aria-level="3"]`);
   await weekItem.locator(".slicerCheckbox").click();
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(1500 * waitMultiplier);
   await debugShot(page, downloadDir, "03-filtro-semana");
 
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(500 * waitMultiplier);
 }
 
 async function debugShot(page, dir, name) {
