@@ -22,11 +22,17 @@ export const VIEWPORT = { width: 1920, height: 889 };
 const REPORT_URLS = {
   // NARTD = "Reporte - Embonor Agencia". Calibrado y verificado esta sesión.
   NARTD: "https://dichter-neira.datawalt.app/report/736",
-  // Report IDs confirmados el 2026-08-13 (home del portal → cada tarjeta
-  // de reporte). Layout/selectores de RED>Detalle NO verificadas en
-  // estos dos todavía — probablemente calcen porque parecen la misma
-  // plantilla de reporte que NARTD, pero no asumir sin probar primero.
+  // ABI: layout de RED>Detalle idéntico a NARTD (mismo botón de drill,
+  // mismo mecanismo de export) y columnas del Excel confirmadas EXACTAS
+  // contra un archivo real — redColumns.mjs no necesitó ningún ajuste.
   ABI: "https://dichter-neira.datawalt.app/report/750",
+  // VSR: mismo mecanismo de export, PERO la tabla "Resumen de RED" carga
+  // ya parcialmente expandida en vez de plana (ver el colapso con
+  // drill-up-level-btn más abajo, necesario solo para esta categoría en
+  // la práctica). Columnas del Excel NO confirmadas todavía contra un
+  // archivo real (se alcanzó a exportar pero no se llegó a inspeccionar
+  // el resultado en esta sesión) — redColumns.mjs.VSR sigue siendo el
+  // mapeo viejo sin verificar.
   VSR: "https://dichter-neira.datawalt.app/report/754",
 };
 
@@ -109,6 +115,33 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
     // captura el iframe compuesto en coordenadas de página) y RECIÉN
     // ahí clickear por selector.
     const TABLE_AREA = { x: 700, y: 650 };
+
+    // VSR (a diferencia de NARTD/ABI) carga la tabla "Resumen de RED" YA
+    // parcialmente expandida (Planta > Oficina anidados desde el
+    // arranque, confirmado en vivo) en vez de plana en el nivel más alto
+    // — si se le suman los 4 clicks de "bajar nivel" sobre ese estado, no
+    // queda en Sala. Por eso primero se colapsa todo con "Resumir"
+    // ([data-testid="drill-up-level-btn"], el ícono ↑) las mismas veces
+    // que se va a drillear, para arrancar siempre desde el mismo estado
+    // plano sin importar la categoría.
+    //
+    // OJO: cuando ya está en el nivel más alto (caso NARTD/ABI, que
+    // arrancan colapsados) este botón viene con el atributo `disabled`
+    // (confirmado en el HTML real) — un `.click()` de Playwright sobre un
+    // botón disabled se queda esperando a que se habilite y nunca pasa,
+    // cuelga el flujo entero. Por eso se chequea `isEnabled()` antes de
+    // cada click y se corta el loop apenas está deshabilitado (ya no hay
+    // más para colapsar).
+    const drillUpBtn = frame.locator('[data-testid="drill-up-level-btn"]');
+    for (let i = 0; i < DRILL_DOWN_STEPS; i++) {
+      await page.mouse.move(TABLE_AREA.x, TABLE_AREA.y);
+      await page.waitForTimeout(300);
+      const puedeColapsar = await drillUpBtn.isEnabled().catch(() => false);
+      if (!puedeColapsar) break;
+      await drillUpBtn.click();
+      await page.waitForTimeout(1500);
+    }
+    await debugShot(page, downloadDir, "03b-colapsado");
 
     // Cada drill-down re-consulta el dataset y repinta la tabla entera.
     // Se deja un screenshot por nivel: si el bot termina exportando el
