@@ -116,9 +116,18 @@ async function requestDownload(jar, { inicio, termino }) {
     },
     body: body.toString(),
   });
-  if (res.status !== 200) {
+  const resLocation = res.headers.get("location") || "";
+  console.log(`solicitud_descarga → status ${res.status}, location "${resLocation}"`);
+  // En el navegador esto respondió 200 (AJAX) — pero es posible que sin
+  // el header exacto que jQuery manda para "esto es AJAX", Django trate
+  // la request como un submit de formulario normal (patrón
+  // POST-redirect-GET) y devuelva un 302 a /corex/downloads en vez de un
+  // 200. Ambos casos son éxito real; solo un 302 de vuelta al login (o
+  // cualquier otro destino) es una falla real.
+  const isRedirectToDownloads = res.status === 302 && resLocation.includes("/corex/downloads");
+  if (res.status !== 200 && !isRedirectToDownloads) {
     const text = await res.text().catch(() => "");
-    throw new Error(`solicitud_descarga devolvió status ${res.status}: ${text.slice(0, 300)}`);
+    throw new Error(`solicitud_descarga devolvió status ${res.status} location "${resLocation}": ${text.slice(0, 300)}`);
   }
 }
 
