@@ -46,9 +46,25 @@ const COORDS = {
 // De Planta (nivel 0) a Sala: Planta > Oficina > Cadena > Bandera > Sala.
 const DRILL_DOWN_STEPS = 4;
 
-export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUser, datawaltPass, downloadDir }) {
+export async function scrapeRedExport({
+  categoria,
+  anio,
+  mes,
+  semana,
+  datawaltUser,
+  datawaltPass,
+  downloadDir,
+  // Multiplica las esperas de carga del reporte (no las de clicks
+  // puntuales) — sync.mjs lo sube en cada reintento. Confirmado en una
+  // corrida real que ABI falló porque el reporte no había terminado de
+  // pintar a los 10s (variabilidad de red del runner de GitHub Actions,
+  // no algo fijo) — con esto un reintento simplemente espera más en vez
+  // de repetir el mismo timing que ya falló una vez.
+  waitMultiplier = 1,
+}) {
   const reportUrl = REPORT_URLS[categoria];
   if (!reportUrl) throw new Error(`No hay report URL calibrada para categoria=${categoria} todavía`);
+  const reportLoadWaitMs = 10000 * waitMultiplier;
 
   const browser = await chromium.launch();
   const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: true });
@@ -86,9 +102,11 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
     // forzar la navegación al reporte de nuevo asegura que quedemos ahí.
     await page.goto(reportUrl);
     // El embed de Power BI (canvas/WebGL) tarda en pintar y no hay forma de
-    // esperarlo con un selector real ANTES de entrar al iframe. 10s dio
-    // margen de sobra en una corrida real del runner de GitHub Actions.
-    await page.waitForTimeout(10000);
+    // esperarlo con un selector real ANTES de entrar al iframe. 10s
+    // alcanzó en una corrida real pero falló en otra (ABI) — la
+    // variabilidad de red del runner hace que un tiempo fijo no sea
+    // confiable siempre, por eso escala con waitMultiplier en reintentos.
+    await page.waitForTimeout(reportLoadWaitMs);
 
     await debugShot(page, downloadDir, "01-report-loaded");
 
@@ -98,9 +116,9 @@ export async function scrapeRedExport({ categoria, anio, mes, semana, datawaltUs
     // real posible. Esperas generosas a propósito: cada navegación repinta
     // el canvas entero y en el runner tarda bastante más que en local.
     await page.mouse.click(COORDS.sidebarRed.x, COORDS.sidebarRed.y);
-    await page.waitForTimeout(8000);
+    await page.waitForTimeout(8000 * waitMultiplier);
     await page.mouse.click(COORDS.tabDetalle.x, COORDS.tabDetalle.y);
-    await page.waitForTimeout(8000);
+    await page.waitForTimeout(8000 * waitMultiplier);
     await debugShot(page, downloadDir, "02-red-detalle");
 
     await selectWeek(frame, page, { anio, mes, semana }, downloadDir);

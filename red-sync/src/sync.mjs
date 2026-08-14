@@ -53,15 +53,37 @@ async function main() {
   const startedAt = new Date().toISOString();
 
   try {
-    const filePath = await scrapeRedExport({
-      categoria,
-      anio,
-      mes,
-      semana,
-      datawaltUser,
-      datawaltPass,
-      downloadDir,
-    });
+    // Reintenta con esperas cada vez más largas — confirmado en una
+    // corrida real que ABI falló porque el reporte de Power BI no había
+    // terminado de pintar a los 10s fijos (variabilidad de red del
+    // runner, no algo que un tiempo fijo resuelva siempre). El
+    // downloadDir se pisa entre intentos a propósito: solo importan las
+    // capturas de debug del último intento (el más cercano a éxito, o el
+    // fallo final si los tres fallan).
+    const MAX_INTENTOS = 3;
+    let filePath;
+    let ultimoError;
+    for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+      try {
+        if (intento > 1) console.log(`Reintento ${intento}/${MAX_INTENTOS} (esperas x${intento})…`);
+        filePath = await scrapeRedExport({
+          categoria,
+          anio,
+          mes,
+          semana,
+          datawaltUser,
+          datawaltPass,
+          downloadDir,
+          waitMultiplier: intento,
+        });
+        ultimoError = null;
+        break;
+      } catch (err) {
+        ultimoError = err;
+        console.error(`Intento ${intento} falló: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    if (ultimoError) throw ultimoError;
     console.log(`Archivo descargado: ${filePath}`);
 
     const result = await uploadRedFile({ filePath, categoria, anio, semana, supabaseUrl, supabaseServiceKey });
