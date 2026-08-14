@@ -41,8 +41,12 @@ async function request(url, jar, opts = {}) {
 }
 
 async function login(jar, usuario, clave) {
-  const home = await request(`${BASE}/`, jar);
-  if (home.status >= 400) throw new Error(`No se pudo cargar la home de login (status ${home.status})`);
+  // "/" hace un 302 a "/ejecuciones/login/" SIN cookie en esa respuesta
+  // (confirmado con curl -D-) — el csrftoken solo se setea en la página
+  // de login en sí, así que hay que pedirla directo, no seguir el
+  // redirect desde "/".
+  const loginPage = await request(`${BASE}/ejecuciones/login/`, jar);
+  if (loginPage.status >= 400) throw new Error(`No se pudo cargar la página de login (status ${loginPage.status})`);
   // El token en el cookie csrftoken y el que Django espera de vuelta en
   // el body/header son el mismo valor mientras no rote — no hace falta
   // parsear el <input hidden> del HTML, alcanza con el valor del cookie.
@@ -54,7 +58,7 @@ async function login(jar, usuario, clave) {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      Referer: `${BASE}/`,
+      Referer: `${BASE}/ejecuciones/login/`,
       "X-CSRFToken": csrftoken,
     },
     body: body.toString(),
