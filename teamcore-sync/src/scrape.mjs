@@ -34,7 +34,11 @@ function cookieHeader(jar) {
 // de Node no trae cookie jar — hay que leer los Set-Cookie de cada
 // respuesta a mano y no perderlos en medio de una redirección.
 async function request(url, jar, opts = {}) {
-  const headers = { Cookie: cookieHeader(jar), ...opts.headers };
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    Cookie: cookieHeader(jar),
+    ...opts.headers,
+  };
   const res = await fetch(url, { ...opts, headers, redirect: "manual" });
   updateJar(jar, res);
   return res;
@@ -64,10 +68,29 @@ async function login(jar, usuario, clave) {
     body: body.toString(),
   });
 
-  // Login correcto = redirect (302) fuera de /ejecuciones/login/. Si
-  // Django vuelve a renderizar el form (200), las credenciales fallaron.
-  if (loginRes.status !== 302) {
-    throw new Error(`Login falló (usuario/contraseña inválidos) — status ${loginRes.status}`);
+  // Login correcto = redirect (302) fuera de /ejecuciones/login/. Un 302
+  // que vuelve a apuntar a /ejecuciones/login/ también es una falla
+  // (confirmado que existe ese patrón: GET a una página protegida sin
+  // sesión responde 302 a ".../login/?next=...") — no alcanza con mirar
+  // el status code solo.
+  const location = loginRes.headers.get("location") || "";
+  if (loginRes.status !== 302 || location.includes("/ejecuciones/login/")) {
+    throw new Error(
+      `Login falló (usuario/contraseña inválidos, o TEAMCORE_USER/TEAMCORE_PASS mal configurados) — status ${loginRes.status}, location "${location}"`,
+    );
+  }
+  if (!jar.sessionid) {
+    throw new Error("Login pareció redirigir OK pero no se recibió cookie sessionid — no se puede continuar autenticado");
+  }
+
+  // Verificación extra: confirmar que la sesión realmente quedó
+  // autenticada antes de seguir, en vez de descubrirlo recién en el paso
+  // de solicitar la descarga con un 302 ambiguo.
+  const check = await request(`${BASE}/corex/descarga_excel`, jar);
+  if (check.status !== 200) {
+    throw new Error(
+      `La sesión no quedó autenticada después del login (GET /corex/descarga_excel devolvió ${check.status})`,
+    );
   }
 }
 
