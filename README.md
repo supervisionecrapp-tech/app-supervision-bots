@@ -8,8 +8,10 @@ admin-panel manual.
   el portal Datawalt (Dichter Neira Analytics).
 - **[presentismo-sync](./presentismo-sync)** — Marcaciones de Presentismo
   WM desde Power BI Service (bi.frax.cl / app.powerbi.com).
+- **[teamcore-sync](./teamcore-sync)** — Teamcore Usabilidad desde el
+  portal propio de Teamcore (cocacolaembonor.cl.teamcore.net).
 
-Ambos loguean cada corrida (éxito o error) en la tabla `bot_runs` de
+Los tres loguean cada corrida (éxito o error) en la tabla `bot_runs` de
 Supabase — el admin-panel.html tiene un calendario que lee de ahí para
 ver de un vistazo si el bot corrió bien, sin entrar a GitHub Actions.
 
@@ -20,9 +22,11 @@ En `Settings → Secrets and variables → Actions` de este repo:
 - `DATAWALT_USER` / `DATAWALT_PASS` — credenciales del portal Datawalt (red-sync).
 - `FRAX_USER` / `FRAX_PASS` — credenciales de Microsoft/Azure AD para
   bi.frax.cl (presentismo-sync).
+- `TEAMCORE_USER` / `TEAMCORE_PASS` — credenciales del portal de Teamcore
+  (teamcore-sync).
 - `SUPABASE_SERVICE_ROLE_KEY` — desde el dashboard de Supabase
   (Project Settings → API → `service_role`/`sb_secret_...`). Da acceso
-  total, tratarla como una contraseña. Compartida por los dos bots.
+  total, tratarla como una contraseña. Compartida por los tres bots.
 
 ## red-sync
 
@@ -65,14 +69,47 @@ porque es el mismo motor Power BI.
 prueba, que sí confirmó la hoja "Export" y las columnas). Revisar el
 artifact `debug-screenshots-presentismo` de la primera corrida real.
 
+## teamcore-sync
+
+Corre vía [`.github/workflows/teamcore-sync.yml`](./.github/workflows/teamcore-sync.yml):
+cada 2 horas de 9:00 a 23:00 Chile (mismo horario que presentismo-sync,
+siempre carga el día actual — el dato es booleano por día, no hace falta
+una corrida especial de "día anterior"). También soporta
+`workflow_dispatch` manual con una fecha específica.
+
+A diferencia de los otros dos, el portal de Teamcore **no es Power BI**
+— es una app Django propia con login usuario/contraseña normal y CSRF
+estándar de Django, así que el bot **no usa Playwright**: todo el flujo
+(login, pedir la descarga vía POST AJAX a `/corex/solicitud_descarga`,
+sondear `/corex/downloads` hasta que la fila quede "Completado", bajar
+el archivo) se hace con `fetch` + un cookie jar manual en
+`teamcore-sync/src/scrape.mjs`. El link final de descarga apunta directo
+a un bucket S3 público, sin necesidad de reenviar cookies de sesión.
+
+Descarga el reporte "Detalles de productos" (`reporte=DETALLE` en el
+form), que es el que trae la hoja "Toma detalles" con las columnas
+`Código Local`/`Fecha` que espera `teamcore_usabilidad_registros` — mismo
+mapeo que la sección "Teamcore — Usabilidad" de `admin-panel.html`.
+
+**Ojo**: el mismo reporte (mismo rango de fechas) lo pide también otro
+proceso ajeno a este repo, con mucha frecuencia (cada 30-60 min todo el
+día) — la tabla de `/corex/downloads` no tiene ningún id que distinga
+"esta solicitud es la nuestra", así que el bot asume que la primera fila
+que matchea tipo+rango es la suya. En el peor caso de carrera agarra la
+fila del otro proceso en vez de la propia, pero para el mismo rango de
+fechas el contenido es el mismo dato fuente, así que no cambia el
+resultado.
+
 ## Correr local (para debuggear)
 
 ```bash
-cd red-sync   # o presentismo-sync
+cd red-sync   # o presentismo-sync / teamcore-sync
 npm install
-npx playwright install chromium
+npx playwright install chromium   # no aplica a teamcore-sync, no usa Playwright
 # red-sync:
 DATAWALT_USER=... DATAWALT_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
 # presentismo-sync:
 FRAX_USER=... FRAX_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
+# teamcore-sync:
+TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
 ```
