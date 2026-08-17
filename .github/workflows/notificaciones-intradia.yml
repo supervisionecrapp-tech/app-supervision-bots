@@ -1,0 +1,30 @@
+name: Notificaciones Intradía (Presentismo + Teamcore)
+
+on:
+  schedule:
+    # 9:10, 11:10, 13:10, 15:10, 17:10 America/Santiago = 13:10, 15:10,
+    # 17:10, 19:10, 21:10 UTC — 10 min después de cada corrida de
+    # presentismo-sync/teamcore-sync que cae en la ventana 8:00-18:00.
+    - cron: "10 13,15,17,19,21 * * *"
+  workflow_dispatch:
+
+jobs:
+  notificar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: notificaciones-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      - name: Avance del día
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+        run: npm run start -- intradia-combinado

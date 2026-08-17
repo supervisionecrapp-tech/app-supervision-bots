@@ -10,8 +10,17 @@ admin-panel manual.
   WM desde Power BI Service (bi.frax.cl / app.powerbi.com).
 - **[teamcore-sync](./teamcore-sync)** — Teamcore Usabilidad desde el
   portal propio de Teamcore (cocacolaembonor.cl.teamcore.net).
+- **[venta-perdida-sync](./venta-perdida-sync)** — Teamcore Venta Perdida
+  desde el "Descargador" de consultas guardadas del mismo portal
+  (cocacolaembonor.cl.teamcore.net/core/dashboard/#/v2), reemplazando la
+  carga manual de CSV en admin-panel.html.
+- **[notificaciones-sync](./notificaciones-sync)** — no scrapea nada: lee
+  los indicadores ya cargados por los bots de arriba y le manda un push
+  personalizado por OneSignal a cada supervisor/coordinador/admin (resumen
+  semanal de Presentismo/Teamcore/Red/Venta Perdida, avance intradía de
+  Presentismo+Teamcore, y recordatorio de documentos pendientes).
 
-Los tres loguean cada corrida (éxito o error) en la tabla `bot_runs` de
+Los cinco loguean cada corrida (éxito o error) en la tabla `bot_runs` de
 Supabase — el admin-panel.html tiene un calendario que lee de ahí para
 ver de un vistazo si el bot corrió bien, sin entrar a GitHub Actions.
 
@@ -23,10 +32,14 @@ En `Settings → Secrets and variables → Actions` de este repo:
 - `FRAX_USER` / `FRAX_PASS` — credenciales de Microsoft/Azure AD para
   bi.frax.cl (presentismo-sync).
 - `TEAMCORE_USER` / `TEAMCORE_PASS` — credenciales del portal de Teamcore
-  (teamcore-sync).
+  (teamcore-sync, venta-perdida-sync — mismo portal, mismo login).
 - `SUPABASE_SERVICE_ROLE_KEY` — desde el dashboard de Supabase
   (Project Settings → API → `service_role`/`sb_secret_...`). Da acceso
-  total, tratarla como una contraseña. Compartida por los tres bots.
+  total, tratarla como una contraseña. Compartida por los cinco bots.
+- `ONESIGNAL_REST_API_KEY` — solo para `notificaciones-sync`. Mismo valor
+  que ya está cargado como secret del proyecto Supabase para la Edge
+  Function `send-push` (Project Settings → Edge Functions → Secrets) —
+  copiar ese mismo valor acá, no generar uno nuevo.
 
 ## red-sync
 
@@ -103,16 +116,144 @@ fila del otro proceso en vez de la propia, pero para el mismo rango de
 fechas el contenido es el mismo dato fuente, así que no cambia el
 resultado.
 
+## venta-perdida-sync
+
+Corre en **dos fases separadas** (dos workflows), porque a diferencia de
+`descarga_excel` (el reporte "DETALLE" que usa teamcore-sync, que resuelve
+en segundos) el reporte de Venta Perdida vive en un sistema de "consultas
+guardadas" con una cola de proceso lenta y muy intermitente en el portal
+— confirmado interactivamente: la misma consulta puede tardar hasta
+~45 min o más en pasar de "En cola" a "Exitoso". Un solo workflow
+esperando ese tiempo es frágil, así que se separó:
+
+- [`venta-perdida-request.yml`](./.github/workflows/venta-perdida-request.yml) —
+  lunes/miércoles/viernes 08:00 Chile. Pide la descarga en el portal
+  (`npm run request`) y sale sin esperar el resultado.
+- [`venta-perdida-collect.yml`](./.github/workflows/venta-perdida-collect.yml) —
+  mismos días, 10:00 Chile (2h después). Busca la descarga pedida antes,
+  espera a que quede lista, la baja y la sube a Supabase (`npm run collect`).
+- [`venta-perdida-retry.yml`](./.github/workflows/venta-perdida-retry.yml) —
+  mismos días, 15:00 Chile (3h después de collect). Si el collect de hoy
+  ya quedó success no hace nada; si no, reintenta desde donde haya
+  quedado — ver el detalle del reintento más abajo.
+
+Las fases no comparten estado entre sí vía GitHub Actions (no hay ningún
+id ni archivo que pasar de una corrida a otra): el nombre que se le pone
+a la consulta en Teamcore es **determinístico** (`bot-vp-<año>w<semana>-<fecha
+de hoy>`), así que "collect" recalcula el mismo nombre y lo busca por
+nombre exacto en `/corex/descargador/jobs/downloads/` — a diferencia del
+reporte DETALLE de teamcore-sync (que no tiene ningún id propio y asume
+"la primera fila que matchea"), acá el nombre elegido por nosotros ya es
+único de por sí. "retry" sí lee estado — pero de `bot_runs` en Supabase,
+no de GitHub Actions (ver más abajo).
+
+**Semana pedida — fija por día** (`targetWeekForToday()` en
+`src/scrape.mjs`): **lunes pide SOLO la semana ISO anterior** (ya
+cerrada, siempre con datos completos); **miércoles y viernes piden SOLO
+la semana actual** (para levantar la carga parcial de la semana en curso
+a mitad y fin de semana). Ya no hay fallback automático probando la otra
+semana dentro de la misma corrida — si el portal estima "0 Bytes" (sin
+datos cargados todavía en el sistema origen, confirmado interactivamente
+que pasa con la semana ISO recién empezada) la corrida falla y queda para
+que "retry" la reintente más tarde, en vez de silenciosamente traer la
+semana equivocada.
+
+**Reintento** (`runRetry()` en `src/sync.mjs`): mira los `bot_runs` de
+HOY (Chile) para `venta-perdida-sync`. Si ya hay un `collect` exitoso, no
+hace nada. Si no, busca el último `request:<jobName>` exitoso de hoy — si
+existe, reintenta SOLO la descarga/carga para ese mismo job (no le vuelve
+a pedir al portal el mismo reporte). Si tampoco hay una solicitud
+exitosa, repite el flujo completo (request + collect) para la semana que
+le tocaba a hoy según `targetWeekForToday()`. Las corridas de retry
+quedan en `bot_runs` con categoría `retry:collect` o `retry:request:...`
+para distinguirlas de las normales.
+
+Confirmado inspeccionando el portal real (Network tab, no adivinado): el
+"Descargador" es una API REST propia bajo `/corex/descargador/` (mismo
+backend Django/misma sesión de login que usa teamcore-sync, solo que bajo
+otra app) — no hace falta Playwright. El archivo final es una URL firmada
+de Google Cloud Storage (7 días de validez), descargable sin cookies,
+mismo patrón que el bucket S3 de teamcore-sync. Ver los comentarios en
+`venta-perdida-sync/src/scrape.mjs` para el detalle de cada endpoint.
+
+El CSV descargado tiene el mismo formato "ORIGINAL" que ya esperaba la
+carga manual de admin-panel.html (sección "Teamcore — Venta Perdida") —
+`venta-perdida-sync/src/upload.mjs` reutiliza exactamente esa misma
+lógica de cruce/recálculo, portada a Node.
+
+**Reemplazo completo por semana + retención de 5 semanas**: antes de
+insertar, se borra lo que ya hubiera para el mismo (año, semana) — una
+rectificación no hace upsert-y-listo, porque si un producto salió del
+archivo nuevo (dejó de tener venta perdida, se descontinuó) un upsert
+dejaría la fila vieja como huérfana. Después de cargar, se recorta el
+histórico a las últimas 5 semanas distintas cargadas (`VP_RETENCION_SEMANAS`
+en `upload.mjs`) — al pasar de 5, se borra la más antigua en cada corrida
+nueva, para que la tabla no crezca sin límite. `admin-panel.html` (carga
+manual) implementa exactamente el mismo criterio, por separado.
+
+**Sin verificar todavía contra una corrida real completa** — se confirmó
+el contrato de la API (preQuery/create/polling/descarga) interactuando
+con el portal real, pero la primera corrida automática de punta a punta
+(incluida la carga a Supabase) no se ha visto terminar todavía porque el
+job de prueba tardaba demasiado para esperarlo en esa sesión. Revisar
+`bot_runs` (`bot = 'venta-perdida-sync'`) después de la primera corrida
+real (lunes, miércoles o viernes).
+
+## notificaciones-sync
+
+No scrapea ningún portal — lee lo que los otros cuatro bots ya subieron a
+Supabase y manda push personalizados por OneSignal (misma API que ya usa la
+Edge Function `send-push`, ver `notificaciones-sync/src/onesignal.mjs`).
+Corre vía cinco workflows separados, uno por grupo de horario (mismo patrón
+de "una fase, un workflow" que `venta-perdida-sync`):
+
+- [`notificaciones-semanal-lunes.yml`](./.github/workflows/notificaciones-semanal-lunes.yml) —
+  lunes 10:00 Chile: resumen semanal de Presentismo y Teamcore.
+- [`notificaciones-venta-perdida.yml`](./.github/workflows/notificaciones-venta-perdida.yml) —
+  lunes 11:00 Chile (después de que `venta-perdida-collect` termine a las
+  10:00): resumen semanal de Venta Perdida.
+- [`notificaciones-red.yml`](./.github/workflows/notificaciones-red.yml) —
+  martes 13:00 Chile: resultados de Red por categoría (NARTD/ABI/VSR).
+- [`notificaciones-intradia.yml`](./.github/workflows/notificaciones-intradia.yml) —
+  9:10/11:10/13:10/15:10/17:10 Chile (10 min después de cada corrida de
+  `presentismo-sync`/`teamcore-sync` dentro de esa ventana): avance del día
+  combinado de Presentismo + Teamcore.
+- [`notificaciones-documentos.yml`](./.github/workflows/notificaciones-documentos.yml) —
+  lunes/miércoles/viernes 12:00 Chile: cantidad de documentos pendientes de
+  mercaderistas por supervisor.
+
+Destinatarios: todo `profiles` activo con `auth_user_id` (sin eso no hay
+`external_id` que targetear en OneSignal — se completa cuando la persona
+entra a la app). Supervisor/coordinador reciben el dato acotado a sus
+propias salas (`salas.supervisor_id`/`coordinador_id`); admin recibe el
+mismo texto pero calculado sobre todas las salas. Si a alguien no le aplica
+el indicador (ej. no tiene salas WM para Presentismo, o no le cargaron
+Venta Perdida esa semana) simplemente no se le manda esa notificación
+puntual, sin error.
+
+Las fórmulas replican exactamente las que ya usa
+`mobile/src/hooks/useLobby.ts` (Presentismo/Teamcore/Venta Perdida) y
+`mobile/src/db/localQueries.ts` (`getRedPromedios`), recalculadas
+server-side para "semana pasada" en vez de "hoy/mes actual" — ver los
+comentarios en cada `src/metrics/*.mjs` para el detalle de cada una.
+
 ## Correr local (para debuggear)
 
 ```bash
-cd red-sync   # o presentismo-sync / teamcore-sync
+cd red-sync   # o presentismo-sync / teamcore-sync / venta-perdida-sync / notificaciones-sync
 npm install
-npx playwright install chromium   # no aplica a teamcore-sync, no usa Playwright
+npx playwright install chromium   # no aplica a teamcore-sync, venta-perdida-sync ni notificaciones-sync, no usan Playwright
 # red-sync:
 DATAWALT_USER=... DATAWALT_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
 # presentismo-sync:
 FRAX_USER=... FRAX_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
 # teamcore-sync:
 TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
+# notificaciones-sync (tipo ∈ presentismo-semanal | teamcore-semanal | red-semanal | venta-perdida-semanal | documentos-pendientes | intradia-combinado):
+SUPABASE_SERVICE_ROLE_KEY=... ONESIGNAL_REST_API_KEY=... npm run start -- presentismo-semanal
+# venta-perdida-sync (correr "request" y esperar antes de "collect"; "retry" es
+# el mismo flujo de recuperación que corre el workflow de retry):
+TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run request
+TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run collect
+TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run retry
 ```

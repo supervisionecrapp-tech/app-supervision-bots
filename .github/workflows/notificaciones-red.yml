@@ -1,0 +1,28 @@
+name: Notificaciones Red
+
+on:
+  schedule:
+    # Martes 13:00 America/Santiago = 17:00 UTC.
+    - cron: "0 17 * * 2"
+  workflow_dispatch:
+
+jobs:
+  notificar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: notificaciones-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      - name: Red semanal
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+        run: npm run start -- red-semanal

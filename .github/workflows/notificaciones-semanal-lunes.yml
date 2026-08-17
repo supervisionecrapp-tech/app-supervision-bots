@@ -1,0 +1,36 @@
+name: Notificaciones Semanal (Lunes)
+
+on:
+  schedule:
+    # Lunes 10:00 America/Santiago = 14:00 UTC (sin horario de verano en
+    # Chile continental — ver la misma nota en teamcore-sync.yml).
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+jobs:
+  notificar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: notificaciones-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      - name: Presentismo semanal
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+        run: npm run start -- presentismo-semanal
+
+      - name: Teamcore semanal
+        if: always()
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+        run: npm run start -- teamcore-semanal

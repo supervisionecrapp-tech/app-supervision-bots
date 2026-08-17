@@ -1,0 +1,30 @@
+name: Notificaciones Venta Perdida
+
+on:
+  schedule:
+    # Lunes 11:00 America/Santiago = 15:00 UTC. Después de las 10:00 (14:00
+    # UTC) en que corre venta-perdida-collect.yml, para dar margen a que
+    # termine de subir el dato de la semana antes de notificar.
+    - cron: "0 15 * * 1"
+  workflow_dispatch:
+
+jobs:
+  notificar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: notificaciones-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      - name: Venta Perdida semanal
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+        run: npm run start -- venta-perdida-semanal
