@@ -3,6 +3,28 @@ import { createClient } from "@supabase/supabase-js";
 import { scrapePresentismoExport } from "./scrape.mjs";
 import { uploadPresentismoFile } from "./upload.mjs";
 
+/** Reintenta `intentar()` hasta `maxIntentos` veces, con espera creciente entre
+ * cada intento (60s, 120s, ...) — el portal de Frax/Power BI puede fallar por
+ * timing/red de forma transitoria, y una espera más larga entre reintentos le
+ * da tiempo a que la sesión/el servidor se recupere en vez de reintentar en
+ * caliente contra el mismo problema. Solo se loguea el resultado FINAL en
+ * bot_runs (no una fila por intento), para no ensuciar el calendario del
+ * admin-panel. */
+async function withRetries(intentar, { maxIntentos = 3, esperaBaseMs = 60000 } = {}) {
+  for (let intento = 1; intento <= maxIntentos; intento++) {
+    try {
+      return await intentar();
+    } catch (err) {
+      const esUltimo = intento === maxIntentos;
+      console.error(`Intento ${intento}/${maxIntentos} falló: ${err instanceof Error ? err.message : err}`);
+      if (esUltimo) throw err;
+      const esperaMs = esperaBaseMs * intento;
+      console.log(`Reintentando en ${Math.round(esperaMs / 1000)}s...`);
+      await new Promise((r) => setTimeout(r, esperaMs));
+    }
+  }
+}
+
 function readArgs() {
   // FECHA opcional en formato YYYY-MM-DD (workflow_dispatch); default =
   // hoy en huso horario de Chile.
@@ -29,10 +51,11 @@ async function main() {
   const startedAt = new Date().toISOString();
 
   try {
-    const filePath = await scrapePresentismoExport({ fecha, datawaltUser, datawaltPass, downloadDir });
-    console.log(`Archivo descargado: ${filePath}`);
-
-    const result = await uploadPresentismoFile({ filePath, supabaseUrl, supabaseServiceKey });
+    const result = await withRetries(async () => {
+      const filePath = await scrapePresentismoExport({ fecha, datawaltUser, datawaltPass, downloadDir });
+      console.log(`Archivo descargado: ${filePath}`);
+      return uploadPresentismoFile({ filePath, supabaseUrl, supabaseServiceKey });
+    });
     console.log(
       `Listo: ${result.cargadas}/${result.total} marcaciones cargadas (${result.sinSala} sin sala reconocida).`,
     );

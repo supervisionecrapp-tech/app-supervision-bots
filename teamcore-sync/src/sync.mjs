@@ -3,6 +3,25 @@ import { createClient } from "@supabase/supabase-js";
 import { scrapeTeamcoreExport } from "./scrape.mjs";
 import { uploadTeamcoreFile } from "./upload.mjs";
 
+/** Reintenta `intentar()` hasta `maxIntentos` veces, con espera creciente entre
+ * cada intento (60s, 120s, ...) — igual que presentismo-sync, para darle
+ * tiempo a fallas transitorias de red/login en vez de reintentar en caliente.
+ * Solo se loguea el resultado FINAL en bot_runs, no una fila por intento. */
+async function withRetries(intentar, { maxIntentos = 3, esperaBaseMs = 60000 } = {}) {
+  for (let intento = 1; intento <= maxIntentos; intento++) {
+    try {
+      return await intentar();
+    } catch (err) {
+      const esUltimo = intento === maxIntentos;
+      console.error(`Intento ${intento}/${maxIntentos} falló: ${err instanceof Error ? err.message : err}`);
+      if (esUltimo) throw err;
+      const esperaMs = esperaBaseMs * intento;
+      console.log(`Reintentando en ${Math.round(esperaMs / 1000)}s...`);
+      await new Promise((r) => setTimeout(r, esperaMs));
+    }
+  }
+}
+
 function readArgs() {
   // FECHA opcional en formato YYYY-MM-DD (workflow_dispatch); default =
   // hoy en huso horario de Chile.
@@ -29,10 +48,11 @@ async function main() {
   const startedAt = new Date().toISOString();
 
   try {
-    const filePath = await scrapeTeamcoreExport({ fecha, teamcoreUser, teamcorePass, downloadDir });
-    console.log(`Archivo descargado: ${filePath}`);
-
-    const result = await uploadTeamcoreFile({ filePath, supabaseUrl, supabaseServiceKey });
+    const result = await withRetries(async () => {
+      const filePath = await scrapeTeamcoreExport({ fecha, teamcoreUser, teamcorePass, downloadDir });
+      console.log(`Archivo descargado: ${filePath}`);
+      return uploadTeamcoreFile({ filePath, supabaseUrl, supabaseServiceKey });
+    });
     console.log(
       `Listo: ${result.cargadas}/${result.pares} pares sala+fecha cargados (${result.descartadas} sin sala reconocida, ${result.total} filas en el Excel).`,
     );
