@@ -1,0 +1,14 @@
+{
+  "name": "venta-perdida-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "request": "node src/sync.mjs request",
+    "collect": "node src/sync.mjs collect",
+    "retry": "node src/sync.mjs retry"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}

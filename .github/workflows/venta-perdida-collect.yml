@@ -1,0 +1,35 @@
+name: Venta Perdida Sync — Collect
+
+on:
+  schedule:
+    # Lunes/miércoles/viernes 10:00 Chile = 14:00 UTC — 2h después de
+    # "request", para darle margen a la cola intermitente del portal
+    # (~45 min según lo observado, a veces más). Adentro además reintenta
+    # con su propio timeout de polling, así que el margen real es mayor.
+    - cron: "0 14 * * 1,3,5"
+  workflow_dispatch:
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: venta-perdida-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      # Busca el job que "request" pidió más temprano (por nombre
+      # determinístico, sin estado compartido), espera a que quede
+      # SUCCEEDED, baja el CSV y lo sube a Supabase.
+      - name: Buscar, descargar y cargar Venta Perdida
+        env:
+          TEAMCORE_USER: ${{ secrets.TEAMCORE_USER }}
+          TEAMCORE_PASS: ${{ secrets.TEAMCORE_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run collect

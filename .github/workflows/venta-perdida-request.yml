@@ -1,0 +1,39 @@
+name: Venta Perdida Sync — Request
+
+on:
+  schedule:
+    # Lunes/miércoles/viernes 08:00 Chile = 12:00 UTC (sin horario de
+    # verano en Chile continental, ver la misma nota en red-sync.yml).
+    # El objetivo de semana lo decide src/scrape.mjs#targetWeekForToday
+    # según el día: lunes pide SOLO la semana anterior (ya cerrada,
+    # siempre completa); miércoles y viernes piden SOLO la semana actual
+    # (para levantar la carga parcial a mitad y fin de semana).
+    # "collect" corre 2h después el mismo día (venta-perdida-collect.yml)
+    # y "retry" unas horas más tarde si algo falló (venta-perdida-retry.yml).
+    - cron: "0 12 * * 1,3,5"
+  workflow_dispatch:
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: venta-perdida-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      # Solo pide la descarga en el portal y sale — no espera a que
+      # termine (la cola es lenta e intermitente, hasta ~45 min).
+      # venta-perdida-collect.yml la busca y la baja más tarde.
+      - name: Solicitar descarga de Venta Perdida
+        env:
+          TEAMCORE_USER: ${{ secrets.TEAMCORE_USER }}
+          TEAMCORE_PASS: ${{ secrets.TEAMCORE_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run request
