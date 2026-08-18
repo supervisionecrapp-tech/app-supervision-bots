@@ -2,10 +2,12 @@ name: Notificaciones Intradía (Presentismo + Teamcore)
 
 on:
   schedule:
-    # 9:10, 11:10, 13:10, 15:10, 17:10 America/Santiago = 13:10, 15:10,
-    # 17:10, 19:10, 21:10 UTC — 10 min después de cada corrida de
+    # ~9:13, 11:13, 13:13, 15:13, 17:13 America/Santiago = 13:13, 15:13,
+    # 17:13, 19:13, 21:13 UTC — ~13 min después de cada corrida de
     # presentismo-sync/teamcore-sync que cae en la ventana 8:00-18:00.
-    - cron: "10 13,15,17,19,21 * * *"
+    # Minuto :13 (no redondo, no :10) — ver nota de por qué en
+    # notificaciones-semanal-lunes.yml.
+    - cron: "13 13,15,17,19,21 * * *"
   workflow_dispatch:
 
 jobs:

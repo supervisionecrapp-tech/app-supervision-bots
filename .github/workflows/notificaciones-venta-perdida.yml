@@ -2,10 +2,12 @@ name: Notificaciones Venta Perdida
 
 on:
   schedule:
-    # Lunes 11:00 America/Santiago = 15:00 UTC. Después de las 10:00 (14:00
+    # ~11:00 America/Santiago = ~15:00 UTC. Después de las 10:00 (14:00
     # UTC) en que corre venta-perdida-collect.yml, para dar margen a que
-    # termine de subir el dato de la semana antes de notificar.
-    - cron: "0 15 * * 1"
+    # termine de subir el dato de la semana antes de notificar. Minuto
+    # corrido a :06 (no redondo) — ver nota de por qué en
+    # notificaciones-semanal-lunes.yml.
+    - cron: "6 15 * * 1"
   workflow_dispatch:
 
 jobs:

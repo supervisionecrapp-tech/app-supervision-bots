@@ -2,8 +2,9 @@ name: Notificaciones Red
 
 on:
   schedule:
-    # Martes 13:00 America/Santiago = 17:00 UTC.
-    - cron: "0 17 * * 2"
+    # ~13:00 America/Santiago = ~17:00 UTC. Minuto corrido a :08 (no
+    # redondo) — ver nota de por qué en notificaciones-semanal-lunes.yml.
+    - cron: "8 17 * * 2"
   workflow_dispatch:
 
 jobs:

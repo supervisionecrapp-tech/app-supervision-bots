@@ -2,9 +2,12 @@ name: Notificaciones Semanal (Lunes)
 
 on:
   schedule:
-    # Lunes 10:00 America/Santiago = 14:00 UTC (sin horario de verano en
-    # Chile continental — ver la misma nota en teamcore-sync.yml).
-    - cron: "0 14 * * 1"
+    # ~10:00 America/Santiago = ~14:00 UTC (sin horario de verano en Chile
+    # continental — ver la misma nota en teamcore-sync.yml). Minuto corrido a
+    # :04 (no exacto) porque los cron en minutos redondos (:00/:10/:15/:30)
+    # son los que más se caen bajo congestión de GitHub Actions — recomendado
+    # por la propia doc de GitHub.
+    - cron: "4 14 * * 1"
   workflow_dispatch:
 
 jobs:
