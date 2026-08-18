@@ -1,0 +1,61 @@
+name: Asistencia Sync
+
+on:
+  schedule:
+    # Sync horario, 7:00 a 23:00 America/Santiago (Chile continental es
+    # UTC-4 fijo, sin horario de verano — mismo criterio que
+    # red-sync.yml/teamcore-sync.yml): 7-23 Chile = 11-23,0-3 UTC.
+    - cron: "0 11-23,0-3 * * *"
+    # Reset diario, 3:00 AM Chile = 07:00 UTC.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "sync o reset"
+        required: false
+        default: "sync"
+        type: choice
+        options: [sync, reset]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: asistencia-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      # Un solo workflow con dos horarios: github.event.schedule identifica
+      # cuál de los dos cron disparó esta corrida. workflow_dispatch usa el
+      # input "modo" en su lugar.
+      - name: Elegir modo (sync/reset)
+        id: modo
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "modo=${{ github.event.inputs.modo }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 7 * * *" ]; then
+            echo "modo=reset" >> "$GITHUB_OUTPUT"
+          else
+            echo "modo=sync" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync
+        if: steps.modo.outputs.modo == 'sync'
+        env:
+          GEOVICTORIA_KEY: ${{ secrets.GEOVICTORIA_KEY }}
+          GEOVICTORIA_SECRET: ${{ secrets.GEOVICTORIA_SECRET }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync
+
+      - name: Reset
+        if: steps.modo.outputs.modo == 'reset'
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run reset
