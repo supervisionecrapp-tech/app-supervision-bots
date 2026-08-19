@@ -1,164 +1,83 @@
 import { chromium } from "playwright";
 
-// bi.frax.cl pasa primero por una pantalla propia de Power BI pidiendo
-// el correo, y de ahí recién al login real de Microsoft (Azure AD) y a
-// app.powerbi.com — es Power BI Service real (no embebido en un
-// portal de terceros como Datawalt), pero el motor de renderizado del
-// reporte es el mismo Power BI de siempre: mismo canvas para
-// tablas/visuales, mismos data-testid en los botones de exportar
-// (confirmado en vivo — ver bots/red-sync para el detalle de por qué
-// esos selectores son estables). La diferencia real está en el login
-// (Microsoft, no Cognito) y en que acá el filtro de fecha SÍ es un
-// <input type="text"> real, no un árbol de checkboxes.
-export const VIEWPORT = { width: 1920, height: 889 };
+// Frax migró el portal de Presentismo de Power BI (bi.frax.cl) a un portal
+// propio "APE2" servido en controltienda.com — reescrito completo el
+// 2026-08-19 tras confirmar el cambio en vivo con el usuario. El dato final
+// es el mismo (marcaciones de entrada/salida por persona/local), pero login
+// y export son mucho más simples que con Power BI: login propio (empresa
+// RUT + clave, sin Azure AD) y un botón "Exportar Excel" que dispara una
+// descarga GET directa (exportar_detalle_xlsx.php), sin diálogos ni
+// overlays intermedios.
+export const VIEWPORT = { width: 1440, height: 900 };
 
-// Workspace "Walmart EXTERNOS" → reporte "WMC-Externos" → página
-// "KPI - APE2" (la única de las 3 páginas del reporte que tiene selector
-// de rango de fechas explícito; "INFO EN VIVO" solo muestra el día de
-// hoy sin poder elegir fecha). IDs confirmados el 2026-08-13.
-const REPORT_URL =
-  "https://app.powerbi.com/groups/02d55b93-6dd2-4b31-824a-9e980b02afb5/reports/e3a2de1e-a071-4a23-9bc0-65e57a51519c/96968b20444fb49a9cd2?experience=power-bi";
+const BASE_URL = "https://www.controltienda.com/proveedor_server";
 
-const TABLE_AREA = { x: 700, y: 650 };
-
-function toMDYYYY(date) {
-  // Formato exigido por el input (aria-description: "Escriba la fecha en
-  // formato M/d/yyyy") — sin ceros a la izquierda.
-  return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+function toISODate(date) {
+  return date.toISOString().slice(0, 10);
 }
 
 export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPass, downloadDir }) {
-  const fechaStr = toMDYYYY(fecha);
+  const fechaStr = toISODate(fecha);
 
-  const browser = await chromium.launch();
+  // controltienda.com está detrás de Cloudflare y bloquea Chromium
+  // headless por completo (se queda atascado en la pantalla "Performing
+  // security verification", nunca resuelve el challenge JS) — confirmado
+  // en pruebas reales el 2026-08-19. headless:false lo pasa como lo pasa
+  // cualquier navegador real; en CI (sin sesión gráfica) esto corre bajo
+  // Xvfb (ver .github/workflows/presentismo-sync.yml).
+  const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: true });
   const page = await context.newPage();
 
   try {
-    await page.goto("https://bi.frax.cl");
-    await page.waitForLoadState("networkidle").catch(() => {});
-    await debugShot(page, downloadDir, "00-post-goto");
+    await page.goto(`${BASE_URL}/login.php`);
+    await debugShot(page, downloadDir, "00-login-page");
 
-    // Confirmado en una corrida real: bi.frax.cl NO redirige directo a
-    // login.microsoftonline.com — primero pasa por esta pantalla propia
-    // de Power BI (dominio distinto) pidiendo el correo, con su propio
-    // botón de envío. El TEXTO cambia según el idioma de la sesión (se
-    // vio en inglés "Enter email"/"Submit" y en español "Escriba el
-    // correo electrónico"/"Enviar" en corridas distintas), por eso se
-    // usan los IDs (#email/#submitBtn), que no cambian. Opcional porque
-    // no está confirmado que aparezca siempre (podría depender de
-    // cookies previas del tenant), timeout corto para no frenar el flujo
-    // si esta vez no sale.
-    const pbiEmailInput = page.locator("#email");
-    if (await pbiEmailInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await pbiEmailInput.fill(datawaltUser);
-      await page.locator("#submitBtn").click();
-      await page.waitForTimeout(2000);
-      await debugShot(page, downloadDir, "00b-post-email-submit");
-    }
+    // El formulario trae un campo señuelo (#usuario_v2 — width/height 0 vía
+    // CSS pero no display:none, autocomplete="username") además del real
+    // (#usuario, autocomplete="organization") — un honeypot anti-bot
+    // confirmado inspeccionando el DOM en vivo. Como llenamos por selector
+    // específico y no "todos los input visibles/de texto", nunca lo
+    // tocamos, igual que haría un usuario real.
+    await page.fill("#usuario", datawaltUser);
+    await page.fill("#clave", datawaltPass);
+    await page.click("button.btn-login");
 
-    // Login estándar de Microsoft/Azure AD (sin MFA, confirmado por el
-    // usuario) — mismo botón "Siguiente"/"Iniciar sesión" (id
-    // idSIButton9) en todas las pantallas. IDs estables y documentados
-    // de Microsoft, no específicos de este tenant.
-    //
-    // Confirmado en una corrida real: como el correo ya se mandó en el
-    // paso anterior (pantalla de Power BI), Azure AD reconoce la cuenta
-    // y salta DIRECTO a "Enter password" — el campo de correo (#i0116)
-    // nunca aparece. Por eso se espera cualquiera de los dos (#i0116 o
-    // #i0118) en vez de asumir que #i0116 siempre está.
-    await page.waitForSelector("#i0116, #i0118", { timeout: 20000 });
-    await debugShot(page, downloadDir, "01-login-ms");
-    if (await page.locator("#i0116").isVisible().catch(() => false)) {
-      await page.fill("#i0116", datawaltUser);
-      await page.click("#idSIButton9");
-      await page.waitForSelector("#i0118", { timeout: 15000 });
-    }
-    await page.fill("#i0118", datawaltPass);
-    await page.click("#idSIButton9");
-
-    // "¿Seguir conectado?" — a veces aparece, a veces no (depende de si
-    // Azure AD decide mostrarlo). Si aparece, "Sí" sirve para no tener
-    // que loguearse de nuevo en la próxima corrida; si no aparece en 8s,
-    // seguimos sin bloquear el flujo.
-    try {
-      await page.waitForSelector("#idSIButton9", { timeout: 8000 });
-      await page.click("#idSIButton9");
-    } catch {
-      // no apareció, seguimos
-    }
-
-    await page.waitForURL(/app\.powerbi\.com/, { timeout: 20000 });
+    await page.waitForURL(/index\.php/, { timeout: 20000 });
     await debugShot(page, downloadDir, "01-logged-in");
 
-    await page.goto(REPORT_URL);
-    // Mismo problema que con Datawalt: el canvas de Power BI tarda en
-    // pintar y no hay selector para esperarlo antes de que exista.
-    await page.waitForTimeout(10000);
-    await debugShot(page, downloadDir, "02-report-loaded");
+    // Aviso de "cuenta con pago pendiente" — no está claro si aparece
+    // siempre o depende del estado de la cuenta, por eso timeout corto y
+    // sin bloquear el flujo si no sale.
+    const cerrarImpago = page.locator("#btnCerrarImpago");
+    if (await cerrarImpago.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await cerrarImpago.click();
+      await page.waitForTimeout(300);
+    }
 
-    // El aria-label ("Fecha de inicio.../Fecha de finalización...") sale
-    // en el idioma de la sesión — confirmado que a veces es español y a
-    // veces inglés, igual que la pantalla de email. Se usa la clase CSS
-    // compartida (date-slicer-input, ver el HTML real que se inspeccionó
-    // a mano) y el orden en el DOM en vez del texto: primer input =
-    // inicio, segundo = fin.
-    const dateInputs = page.locator("input.date-slicer-input");
-    const startInput = dateInputs.nth(0);
-    const endInput = dateInputs.nth(1);
+    await page.goto(`${BASE_URL}/reportes/`);
+    await page.waitForSelector("#btn-export-detalle", { timeout: 20000 });
+    await debugShot(page, downloadDir, "02-reportes-loaded");
 
-    // A pedido explícito: siempre la fecha de FIN primero, después la de
-    // INICIO — si se hace al revés, Power BI puede rechazar el rango
-    // (fin quedando antes que el inicio ya cargado) o recalcular mal.
-    //
-    // Confirmado en una corrida real: el click abre un mini-calendario
-    // (overlay de Angular CDK) que tapa el resto de los filtros — hay que
-    // ESCRIBIR la fecha (fill), no elegirla clickeando un día. Un simple
-    // Escape no alcanza para cerrarlo del todo: queda un
-    // ".cdk-overlay-backdrop" invisible pero activo tapando toda la
-    // pantalla, que bloquea el click sobre el siguiente campo
-    // ("intercepts pointer events"). Hay que esperar a que ese backdrop
-    // realmente desaparezca del DOM antes de seguir.
-    await endInput.click({ clickCount: 3 });
-    await endInput.fill(fechaStr);
-    await closeDatePickerOverlay(page);
-    await debugShot(page, downloadDir, "03a-fecha-fin-cerrada");
+    // Los filtros de fecha son inputs type=date nativos (value YYYY-MM-DD)
+    // — a diferencia de Power BI, no hay overlay de calendario que cerrar
+    // ni hace falta escribir en un orden particular.
+    await page.fill("#f-fi", fechaStr);
+    await page.fill("#f-ff", fechaStr);
+    await page.click("#btn-aplicar");
 
-    await startInput.click({ clickCount: 3 });
-    await startInput.fill(fechaStr);
-    await closeDatePickerOverlay(page);
+    // La tabla "Detalle de marcas" se recarga vía AJAX (DataTables server-side,
+    // api_detalle.php) — no hay un selector confiable de "listo", se espera
+    // un tiempo fijo igual que se hacía con el canvas de Power BI.
     await page.waitForTimeout(3000);
     await debugShot(page, downloadDir, "03-fecha-filtrada");
 
-    // Igual que en red-sync: la barra de herramientas del visual (donde
-    // vive "Más opciones") tiene tamaño cero hasta que el mouse pasa
-    // sobre la tabla completa. Esta página tiene DOS visuales con el
-    // mismo botón (la tabla resumen "PROVEEDOR" arriba, que sí tiene
-    // drill, y la tabla plana de detalle abajo, que es la que
-    // necesitamos) — confirmado en una corrida real que el selector sin
-    // scope encuentra ambos (strict mode violation). El segundo match
-    // (nth(1)) es el de la tabla plana (el texto de accesibilidad del
-    // primero menciona "Drill on/Rows/Columns", el segundo no).
-    const moreOptionsBtn = page.locator('[data-testid="visual-more-options-btn"]').nth(1);
-    await page.mouse.move(TABLE_AREA.x, TABLE_AREA.y);
-    await page.waitForTimeout(300);
-    await moreOptionsBtn.click();
-    await page.waitForTimeout(1500);
-    await debugShot(page, downloadDir, "04-menu-abierto");
-
-    // El texto del ítem del menú cambia de idioma igual que todo lo
-    // demás en esta sesión ("Exportar datos" en español, "Export data"
-    // en inglés) — se usa el ícono (pbi-glyph-export), que no cambia.
-    await page.locator(".pbi-menu-item").filter({ has: page.locator(".pbi-glyph-export") }).click();
-    await page.waitForTimeout(2500);
-    await debugShot(page, downloadDir, "05-dialogo-exportar");
-
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.locator('[data-testid="export-btn"]').click(),
+      page.click("#btn-export-detalle"),
     ]);
 
-    const filePath = `${downloadDir}/presentismo-${fecha.toISOString().slice(0, 10)}.xlsx`;
+    const filePath = `${downloadDir}/presentismo-${fechaStr}.xlsx`;
     await download.saveAs(filePath);
     return filePath;
   } catch (err) {
@@ -167,19 +86,6 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
   } finally {
     await browser.close();
   }
-}
-
-async function closeDatePickerOverlay(page) {
-  await page.keyboard.press("Escape").catch(() => {});
-  // Click en un punto vacío del reporte — "click afuera" es lo que los
-  // overlays de Angular CDK esperan para cerrarse solos. (10,10) parecía
-  // neutro pero en una corrida real pegó justo en el ícono de apps de
-  // Microsoft 365 del header y abrió ESE menú en vez de cerrar el
-  // calendario — (1200,450) cae en el espacio en blanco del reporte,
-  // lejos de cualquier ícono/botón del header o de los filtros.
-  await page.mouse.click(1200, 450).catch(() => {});
-  await page.waitForSelector(".cdk-overlay-backdrop", { state: "detached", timeout: 3000 }).catch(() => {});
-  await page.waitForTimeout(300);
 }
 
 async function debugShot(page, dir, name) {

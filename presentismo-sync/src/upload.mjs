@@ -25,8 +25,10 @@ function cleanText(v) {
 
 export async function uploadPresentismoFile({ filePath, supabaseUrl, supabaseServiceKey }) {
   const wb = XLSX.readFile(filePath, { cellDates: true });
-  const ws = wb.Sheets["Export"];
-  if (!ws) throw new Error(`El archivo no tiene una hoja "Export" (hojas: ${wb.SheetNames.join(", ")})`);
+  // El portal nuevo (APE2, ver src/scrape.mjs) exporta la hoja como
+  // "Detalle" en vez de "Export" (nombre del portal Power BI anterior).
+  const ws = wb.Sheets["Detalle"];
+  if (!ws) throw new Error(`El archivo no tiene una hoja "Detalle" (hojas: ${wb.SheetNames.join(", ")})`);
 
   const raw = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
 
@@ -64,7 +66,9 @@ export async function uploadPresentismoFile({ filePath, supabaseUrl, supabaseSer
       formato: cleanText(r["FORMATO"]),
       rut_persona: String(r["RUT PERSONA"]).trim(),
       nombre_persona: cleanText(r["NOMBRE PERSONA"]),
-      cargo: cleanText(r["NOMBRE CARGO"]),
+      // El portal nuevo (APE2) llama a esta columna "CARGO" (antes
+      // "NOMBRE CARGO" en el export de Power BI).
+      cargo: cleanText(r["CARGO"]),
       entrada: r._entrada.toISOString(),
       salida: r._salida ? r._salida.toISOString() : null,
     });

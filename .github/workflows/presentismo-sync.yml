@@ -33,6 +33,11 @@ jobs:
 
       - run: npm install
       - run: npx playwright install --with-deps chromium
+      # controltienda.com (portal nuevo, ver src/scrape.mjs) bloquea
+      # Chromium headless vía Cloudflare — se lanza headed, por eso hace
+      # falta una pantalla virtual en el runner (que no tiene sesión
+      # gráfica).
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
 
       # La corrida de las 07:00 Chile (11:00 UTC) es la única que carga
       # el día ANTERIOR — el resto carga el día actual. A las 07:00 Chile
@@ -54,7 +59,7 @@ jobs:
           FRAX_USER: ${{ secrets.FRAX_USER }}
           FRAX_PASS: ${{ secrets.FRAX_PASS }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npm run sync
+        run: xvfb-run -a npm run sync
 
       - name: Subir capturas de debug
         if: always()
