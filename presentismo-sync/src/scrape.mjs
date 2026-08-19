@@ -19,13 +19,28 @@ function toISODate(date) {
 export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPass, downloadDir }) {
   const fechaStr = toISODate(fecha);
 
-  // controltienda.com está detrás de Cloudflare y bloquea Chromium
-  // headless por completo (se queda atascado en la pantalla "Performing
-  // security verification", nunca resuelve el challenge JS) — confirmado
-  // en pruebas reales el 2026-08-19. headless:false lo pasa como lo pasa
-  // cualquier navegador real; en CI (sin sesión gráfica) esto corre bajo
-  // Xvfb (ver .github/workflows/presentismo-sync.yml).
-  const browser = await chromium.launch({ headless: false });
+  // controltienda.com está detrás de Cloudflare y le muestra un desafío
+  // JS ("Verifica que tú eres un ser humano") a cualquier tráfico
+  // automatizado. Probado en vivo el 2026-08-19:
+  //  - headless (bundled Chromium de Playwright): nunca resuelve el
+  //    desafío, se queda pegado indefinidamente.
+  //  - headed con Xvfb en GitHub Actions (IP de datacenter): escala a un
+  //    checkbox de Cloudflare Turnstile que no se puede ni se debe
+  //    resolver por automatización.
+  //  - headed con channel:"chrome" (el Chrome real instalado, no el
+  //    Chromium embebido) desde esta IP residencial: el desafío se
+  //    resuelve solo en ~10s, sin checkbox. Por eso se usan ambas cosas
+  //    a la vez — el Chrome del sistema, no headless — y por eso este
+  //    bot corre localmente (Programador de tareas de Windows, ver
+  //    presentismo-sync/run-local.ps1) en vez de en GitHub Actions.
+  // --window-position lo saca de la pantalla visible para no interrumpir
+  // al usuario; sigue siendo un Chrome real y visible para Cloudflare,
+  // solo fuera del área del monitor.
+  const browser = await chromium.launch({
+    channel: "chrome",
+    headless: false,
+    args: ["--window-position=-2400,0"],
+  });
   const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: true });
   const page = await context.newPage();
 
@@ -43,7 +58,9 @@ export async function scrapePresentismoExport({ fecha, datawaltUser, datawaltPas
     await page.fill("#clave", datawaltPass);
     await page.click("button.btn-login");
 
-    await page.waitForURL(/index\.php/, { timeout: 20000 });
+    // Timeout largo: el desafío de Cloudflare mencionado arriba puede
+    // tardar hasta ~20s en resolverse solo antes de redirigir.
+    await page.waitForURL(/index\.php/, { timeout: 45000 });
     await debugShot(page, downloadDir, "01-logged-in");
 
     // Aviso de "cuenta con pago pendiente" — no está claro si aparece
