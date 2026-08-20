@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "sync": "node src/sync.mjs",
-    "reset": "node src/reset.mjs"
+    "reset": "node src/reset.mjs",
+    "roster": "node src/roster.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0"

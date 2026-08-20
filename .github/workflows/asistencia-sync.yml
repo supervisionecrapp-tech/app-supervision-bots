@@ -8,14 +8,18 @@ on:
     - cron: "0 11-23,0-3 * * *"
     # Reset diario, 3:00 AM Chile = 07:00 UTC.
     - cron: "0 7 * * *"
+    # Roster de colaboradores (Turnos Extras) diario, 6:00 AM Chile = 10:00 UTC
+    # — antes de que arranque el día, para que los supervisores ya vean el
+    # roster actualizado desde la primera solicitud.
+    - cron: "0 10 * * *"
   workflow_dispatch:
     inputs:
       modo:
-        description: "sync o reset"
+        description: "sync, reset o roster"
         required: false
         default: "sync"
         type: choice
-        options: [sync, reset]
+        options: [sync, reset, roster]
 
 jobs:
   run:
@@ -42,6 +46,8 @@ jobs:
             echo "modo=${{ github.event.inputs.modo }}" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "0 7 * * *" ]; then
             echo "modo=reset" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 10 * * *" ]; then
+            echo "modo=roster" >> "$GITHUB_OUTPUT"
           else
             echo "modo=sync" >> "$GITHUB_OUTPUT"
           fi
@@ -59,3 +65,11 @@ jobs:
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npm run reset
+
+      - name: Roster de colaboradores (Turnos Extras)
+        if: steps.modo.outputs.modo == 'roster'
+        env:
+          GEOVICTORIA_KEY: ${{ secrets.GEOVICTORIA_KEY }}
+          GEOVICTORIA_SECRET: ${{ secrets.GEOVICTORIA_SECRET }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run roster
