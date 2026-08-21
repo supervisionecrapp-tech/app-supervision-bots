@@ -6,8 +6,6 @@ admin-panel manual.
 
 - **[red-sync](./red-sync)** — Red (NARTD, hoy; ABI/VSR pendientes) desde
   el portal Datawalt (Dichter Neira Analytics).
-- **[presentismo-sync](./presentismo-sync)** — Marcaciones de Presentismo
-  WM desde Power BI Service (bi.frax.cl / app.powerbi.com).
 - **[teamcore-sync](./teamcore-sync)** — Teamcore Usabilidad desde el
   portal propio de Teamcore (cocacolaembonor.cl.teamcore.net).
 - **[venta-perdida-sync](./venta-perdida-sync)** — Teamcore Venta Perdida
@@ -20,7 +18,7 @@ admin-panel manual.
   semanal de Presentismo/Teamcore/Red/Venta Perdida, avance intradía de
   Presentismo+Teamcore, y recordatorio de documentos pendientes).
 
-Los cinco loguean cada corrida (éxito o error) en la tabla `bot_runs` de
+Los cuatro loguean cada corrida (éxito o error) en la tabla `bot_runs` de
 Supabase — el admin-panel.html tiene un calendario que lee de ahí para
 ver de un vistazo si el bot corrió bien, sin entrar a GitHub Actions.
 
@@ -29,13 +27,11 @@ ver de un vistazo si el bot corrió bien, sin entrar a GitHub Actions.
 En `Settings → Secrets and variables → Actions` de este repo:
 
 - `DATAWALT_USER` / `DATAWALT_PASS` — credenciales del portal Datawalt (red-sync).
-- `FRAX_USER` / `FRAX_PASS` — credenciales de Microsoft/Azure AD para
-  bi.frax.cl (presentismo-sync).
 - `TEAMCORE_USER` / `TEAMCORE_PASS` — credenciales del portal de Teamcore
   (teamcore-sync, venta-perdida-sync — mismo portal, mismo login).
 - `SUPABASE_SERVICE_ROLE_KEY` — desde el dashboard de Supabase
   (Project Settings → API → `service_role`/`sb_secret_...`). Da acceso
-  total, tratarla como una contraseña. Compartida por los cinco bots.
+  total, tratarla como una contraseña. Compartida por los cuatro bots.
 - `ONESIGNAL_REST_API_KEY` — solo para `notificaciones-sync`. Mismo valor
   que ya está cargado como secret del proyecto Supabase para la Edge
   Function `send-push` (Project Settings → Edge Functions → Secrets) —
@@ -64,34 +60,13 @@ detalle de cada selector y por qué.
 **Pendiente**: report IDs y columnas de ABI/VSR sin verificar contra un
 archivo real todavía (`red-sync/src/scrape.mjs` y `redColumns.mjs`).
 
-## presentismo-sync
-
-Corre vía [`.github/workflows/presentismo-sync.yml`](./.github/workflows/presentismo-sync.yml):
-cada 2 horas de 9:00 a 23:00 Chile (día actual), más una corrida especial
-a las 7:00 Chile que carga el día ANTERIOR completo. También soporta
-`workflow_dispatch` manual con una fecha específica.
-
-A diferencia de Datawalt, acá es Power BI Service real (no embebido) con
-login de Microsoft/Azure AD — sin MFA en la cuenta usada, así que el
-login se automatiza con los IDs estándar de Microsoft (`#i0116`/`#i0118`/
-`#idSIButton9`). El filtro de fecha es un `<input>` de texto real
-(`aria-label` empieza con "Fecha de inicio"/"Fecha de finalización",
-formato `M/d/yyyy`) — mucho más simple que el árbol de checkboxes de
-Red. El resto (exportar datos) usa los mismos `data-testid` que red-sync
-porque es el mismo motor Power BI.
-
-**Sin verificar todavía**: una corrida real completa de punta a punta
-(se armó en base a la exploración interactiva + un export manual de
-prueba, que sí confirmó la hoja "Export" y las columnas). Revisar el
-artifact `debug-screenshots-presentismo` de la primera corrida real.
-
 ## teamcore-sync
 
 Corre vía [`.github/workflows/teamcore-sync.yml`](./.github/workflows/teamcore-sync.yml):
-cada 2 horas de 9:00 a 23:00 Chile (mismo horario que presentismo-sync,
-siempre carga el día actual — el dato es booleano por día, no hace falta
-una corrida especial de "día anterior"). También soporta
-`workflow_dispatch` manual con una fecha específica.
+cada 2 horas de 9:00 a 23:00 Chile, siempre carga el día actual — el dato
+es booleano por día, no hace falta una corrida especial de "día
+anterior". También soporta `workflow_dispatch` manual con una fecha
+específica.
 
 A diferencia de los otros dos, el portal de Teamcore **no es Power BI**
 — es una app Django propia con login usuario/contraseña normal y CSRF
@@ -216,8 +191,8 @@ de "una fase, un workflow" que `venta-perdida-sync`):
   martes 13:00 Chile: resultados de Red por categoría (NARTD/ABI/VSR).
 - [`notificaciones-intradia.yml`](./.github/workflows/notificaciones-intradia.yml) —
   9:10/11:10/13:10/15:10/17:10 Chile (10 min después de cada corrida de
-  `presentismo-sync`/`teamcore-sync` dentro de esa ventana): avance del día
-  combinado de Presentismo + Teamcore.
+  `teamcore-sync` dentro de esa ventana): avance del día combinado de
+  Presentismo + Teamcore.
 - [`notificaciones-documentos.yml`](./.github/workflows/notificaciones-documentos.yml) —
   lunes/miércoles/viernes 12:00 Chile: cantidad de documentos pendientes de
   mercaderistas por supervisor.
@@ -240,13 +215,11 @@ comentarios en cada `src/metrics/*.mjs` para el detalle de cada una.
 ## Correr local (para debuggear)
 
 ```bash
-cd red-sync   # o presentismo-sync / teamcore-sync / venta-perdida-sync / notificaciones-sync
+cd red-sync   # o teamcore-sync / venta-perdida-sync / notificaciones-sync
 npm install
 npx playwright install chromium   # no aplica a teamcore-sync, venta-perdida-sync ni notificaciones-sync, no usan Playwright
 # red-sync:
 DATAWALT_USER=... DATAWALT_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
-# presentismo-sync:
-FRAX_USER=... FRAX_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
 # teamcore-sync:
 TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
 # notificaciones-sync (tipo ∈ presentismo-semanal | teamcore-semanal | red-semanal | venta-perdida-semanal | documentos-pendientes | intradia-combinado):
