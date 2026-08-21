@@ -2,11 +2,13 @@ name: Presentismo Sync
 
 on:
   schedule:
-    # Cada 1 hora, todo el día — "desde" en el portal siempre es el día
+    # Cada 1 hora, 6:00 a 23:00 Chile (Chile continental es UTC-4 fijo,
+    # sin horario de verano — mismo criterio que asistencia-sync.yml):
+    # 6-23 Chile = 10-23,0-3 UTC. "desde" en el portal siempre es el día
     # anterior a "hasta" (hoy), así que cada corrida vuelve a traer el
     # rango completo; el upsert (rut_persona, local_code, entrada) hace
     # que las marcaciones repetidas de corridas anteriores no dupliquen.
-    - cron: "0 * * * *"
+    - cron: "0 10-23,0-3 * * *"
   workflow_dispatch:
     inputs:
       fecha:
