@@ -16,6 +16,12 @@ lanza una excepción como cualquier otro fallo y el intento se reintenta
 
 Selectores DOM confirmados contra el portal real en la versión anterior
 (commit 7e72463 y ba860d8 de este mismo repo) — no adivinados.
+
+Confirmado en una corrida real (2026-08-21, GitHub Actions): con
+Camoufox el portal deja pasar sin mostrar ningún challenge — Scrapling
+loguea "ERROR: No Cloudflare challenge found" en ese caso, pero es
+informativo, no un fallo (`solve_cloudflare` busca un challenge para
+resolverlo y simplemente no encontró ninguno esa vez).
 """
 
 from __future__ import annotations
@@ -85,13 +91,27 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
         download.save_as(str(file_path))
         downloaded_path["path"] = file_path
 
+        # Scrapling intenta leer el contenido final de la página después de
+        # que `page_action` termina, para armar su objeto Response — como
+        # acá ya navegamos varias veces (login.php -> index.php ->
+        # reportes/) y la última acción fue una descarga (no una
+        # navegación normal), esa lectura fallaba con "Protocol error...
+        # Response body is not available" (no rompe el flujo, pero ensucia
+        # el log). Dejar la página en un estado neutro y quieto antes de
+        # devolverla evita esa lectura fallida.
+        page.goto("about:blank")
+
         return page
 
     StealthyFetcher.fetch(
         f"{BASE_URL}/login.php",
         headless=True,
         solve_cloudflare=True,
-        network_idle=True,
+        # Los waits explícitos de arriba (wait_for_url/wait_for_selector/
+        # wait_for_timeout) ya cubren cada paso — esperar además a
+        # "networkidle" en cada navegación solo suma tiempo muerto
+        # (trackers/pixels de terceros que nunca terminan de cargar).
+        network_idle=False,
         page_action=interactuar,
     )
 

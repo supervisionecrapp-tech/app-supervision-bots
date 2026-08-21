@@ -2,10 +2,11 @@ name: Presentismo Sync
 
 on:
   schedule:
-    # Diario, 10:00 Chile = 14:00 UTC (Chile continental es UTC-4 fijo,
-    # sin horario de verano — mismo criterio que los demás workflows de
-    # este repo).
-    - cron: "0 14 * * *"
+    # Cada 1 hora, todo el día — "desde" en el portal siempre es el día
+    # anterior a "hasta" (hoy), así que cada corrida vuelve a traer el
+    # rango completo; el upsert (rut_persona, local_code, entrada) hace
+    # que las marcaciones repetidas de corridas anteriores no dupliquen.
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       fecha:
