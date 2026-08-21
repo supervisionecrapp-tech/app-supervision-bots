@@ -1,0 +1,41 @@
+name: Presentismo Sync
+
+on:
+  schedule:
+    # Diario, 10:00 Chile = 14:00 UTC (Chile continental es UTC-4 fijo,
+    # sin horario de verano — mismo criterio que los demás workflows de
+    # este repo).
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      fecha:
+        description: "Fecha 'hasta' (YYYY-MM-DD, opcional). 'desde' es siempre el día anterior. Vacío = hoy."
+        required: false
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: presentismo-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      # Instala el navegador (Camoufox) que usa StealthyFetcher — mismo
+      # rol que `playwright install` en los otros bots de este repo.
+      - run: scrapling install
+
+      - name: Sync
+        env:
+          FRAX_USER: ${{ secrets.FRAX_USER }}
+          FRAX_PASS: ${{ secrets.FRAX_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FECHA: ${{ github.event.inputs.fecha }}
+        run: python src/sync.py

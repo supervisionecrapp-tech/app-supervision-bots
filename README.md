@@ -17,8 +17,12 @@ admin-panel manual.
   personalizado por OneSignal a cada supervisor/coordinador/admin (resumen
   semanal de Presentismo/Teamcore/Red/Venta Perdida, avance intradía de
   Presentismo+Teamcore, y recordatorio de documentos pendientes).
+- **[presentismo-sync](./presentismo-sync)** — Presentismo WM (marcaciones
+  entrada/salida) desde el portal APE2 de Frax
+  (controltienda.com/proveedor_server). Reemplaza la carga manual de Excel
+  en admin-panel.html (sección "Presentismo WM — Marcaciones").
 
-Los cuatro loguean cada corrida (éxito o error) en la tabla `bot_runs` de
+Todos loguean cada corrida (éxito o error) en la tabla `bot_runs` de
 Supabase — el admin-panel.html tiene un calendario que lee de ahí para
 ver de un vistazo si el bot corrió bien, sin entrar a GitHub Actions.
 
@@ -29,9 +33,11 @@ En `Settings → Secrets and variables → Actions` de este repo:
 - `DATAWALT_USER` / `DATAWALT_PASS` — credenciales del portal Datawalt (red-sync).
 - `TEAMCORE_USER` / `TEAMCORE_PASS` — credenciales del portal de Teamcore
   (teamcore-sync, venta-perdida-sync — mismo portal, mismo login).
+- `FRAX_USER` / `FRAX_PASS` — credenciales (RUT + clave) del portal APE2 de
+  Frax (presentismo-sync).
 - `SUPABASE_SERVICE_ROLE_KEY` — desde el dashboard de Supabase
   (Project Settings → API → `service_role`/`sb_secret_...`). Da acceso
-  total, tratarla como una contraseña. Compartida por los cuatro bots.
+  total, tratarla como una contraseña. Compartida por todos los bots.
 - `ONESIGNAL_REST_API_KEY` — solo para `notificaciones-sync`. Mismo valor
   que ya está cargado como secret del proyecto Supabase para la Edge
   Function `send-push` (Project Settings → Edge Functions → Secrets) —
@@ -212,6 +218,41 @@ Las fórmulas replican exactamente las que ya usa
 server-side para "semana pasada" en vez de "hoy/mes actual" — ver los
 comentarios en cada `src/metrics/*.mjs` para el detalle de cada una.
 
+## presentismo-sync
+
+Corre vía [`presentismo-sync.yml`](./.github/workflows/presentismo-sync.yml):
+**diario 10:00 Chile**. Filtra el portal APE2 con "desde" = día anterior y
+"hasta" = hoy (sin tocar ese campo, a pedido explícito), descarga el Excel
+de la tabla "Detalle de marcas" y lo sube a `presentismo_registros` —
+mismo mapeo de columnas (`LOCAL`/`RUT PERSONA`/`ENTRADA`/`SALIDA`/etc.,
+descartando `FORMATO=SBA`) que ya usaba la carga manual de
+admin-panel.html. También soporta `workflow_dispatch` con una fecha
+específica (`fecha`, opcional — queda en el campo "hasta"; "desde" sigue
+siendo el día anterior a esa).
+
+**A diferencia de los otros bots, usa Python + [Scrapling](https://github.com/D4Vinci/Scrapling)
+en vez de Node/Playwright.** Motivo: este mismo bot existió antes en
+Node/Playwright (ver git log — "Eliminar presentismo-sync") y se eliminó
+porque controltienda.com está detrás de Cloudflare y bloqueaba con un
+checkbox Turnstile irresoluble a Chromium headless y a Chrome headed
+corriendo desde la IP de datacenter de GitHub Actions (solo funcionaba con
+Chrome real desde una IP residencial). `StealthyFetcher` de Scrapling
+(navegador Camoufox) con `solve_cloudflare=True` automatiza
+específicamente el resuelto de Turnstile, algo que Playwright liso no
+hacía — pero **sigue sin garantía**: si el portal escala a un challenge
+que Camoufox tampoco resuelve, la corrida falla igual (con 3 reintentos
+con espera creciente, igual que los demás bots) y hay que revisar
+`bot_runs` (`bot = 'presentismo-sync'`). Si vuelve a fallar de forma
+sistemática, el fallback ya probado es la carga semi-manual de
+admin-panel.html (sección "Presentismo WM — Marcaciones"), que sigue
+intacta y no depende de este bot.
+
+Selectores DOM confirmados contra el portal real en la versión Node
+anterior (no adivinados): login por `#usuario`/`#clave` (con honeypot
+`#usuario_v2` a evitar), filtros de fecha `#f-fi`/`#f-ff` (inputs
+`type=date` nativos), botón "Exportar Excel" `#btn-export-detalle`. Ver
+los comentarios en `presentismo-sync/src/scrape.py` para el detalle.
+
 ## Correr local (para debuggear)
 
 ```bash
@@ -229,4 +270,10 @@ SUPABASE_SERVICE_ROLE_KEY=... ONESIGNAL_REST_API_KEY=... npm run start -- presen
 TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run request
 TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run collect
 TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run retry
+
+# presentismo-sync (Python, no Node — ver la sección de arriba):
+cd presentismo-sync
+pip install -r requirements.txt
+scrapling install
+FRAX_USER=... FRAX_PASS=... SUPABASE_SERVICE_ROLE_KEY=... python src/sync.py
 ```
