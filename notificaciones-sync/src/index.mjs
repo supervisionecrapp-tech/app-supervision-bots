@@ -95,6 +95,13 @@ async function main() {
   console.log(`Notificaciones — tipo: ${tipo}`);
 
   try {
+    // La bandeja de entrada solo guarda los últimos 3 días — se poda acá
+    // en vez de con un cron aparte, aprovechando que este bot ya corre
+    // varias veces al día entre los 5 workflows de notificaciones-sync.
+    const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const { error: purgeError } = await supabase.from("notificaciones").delete().lt("created_at", cutoff);
+    if (purgeError) console.error("No se pudo podar la bandeja de notificaciones:", purgeError.message);
+
     const hoy = hoyChile();
     const { anio, semana } = getIsoWeek(hoy);
     const { anio: anioPasado, semana: semanaPasada } = previousIsoWeek(hoy);
@@ -115,6 +122,16 @@ async function main() {
       }
       if (!message) continue;
       conDatos++;
+
+      const { error: insertError } = await supabase.from("notificaciones").insert({
+        auth_user_id: destinatario.authUserId,
+        tipo,
+        titulo: TITULOS[tipo],
+        mensaje: message,
+      });
+      if (insertError) {
+        console.error(`No se pudo guardar en la bandeja de ${destinatario.fullName}: ${insertError.message}`);
+      }
 
       try {
         await sendPush(destinatario.authUserId, TITULOS[tipo], message);
