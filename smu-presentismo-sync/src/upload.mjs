@@ -65,7 +65,14 @@ export async function uploadSmuAccessFile({ filePath, supabaseUrl, supabaseServi
       continue;
     }
     const salaId = salaByCodigo.get(local.code) ?? null;
-    if (!salaId) sinSala++;
+    if (!salaId) {
+      // Local que no está en la Maestra de Salas de este proyecto (SMU
+      // tiene más locales de los que se supervisan acá) — se descarta en
+      // vez de guardar con sala_id null, para no acumular data que nunca
+      // se va a poder usar en ningún cálculo.
+      sinSala++;
+      continue;
+    }
     upsertRows.push({
       sala_id: salaId,
       local_code: local.code,
