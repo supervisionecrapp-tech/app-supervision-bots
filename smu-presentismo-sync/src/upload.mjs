@@ -33,6 +33,15 @@ export async function uploadSmuAccessFile({ filePath, supabaseUrl, supabaseServi
 
   const raw = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
 
+  // Diagnóstico temporal: el primer intento en CI contó filas pero cargó 0
+  // — hay que ver qué forma tienen realmente las claves/valores de la
+  // primera fila para saber si el problema es el nombre de columna, el
+  // formato de fecha, u otra cosa. Sacar una vez que quede confirmado.
+  if (raw.length > 0) {
+    console.log("DEBUG primera fila:", JSON.stringify(raw[0]));
+    console.log("DEBUG columnas detectadas:", Object.keys(raw[0]));
+  }
+
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   const { data: salasSmu, error: salasErr } = await supabase
