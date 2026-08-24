@@ -78,14 +78,25 @@ export async function uploadSmuAccessFile({ filePath, supabaseUrl, supabaseServi
     });
   }
 
+  // Una misma persona puede tener más de un Ingreso (o Salida) el mismo día
+  // en la misma sala — sin hora en el reporte no hay forma de distinguirlos,
+  // así que se deduplica por la misma clave del unique index antes de subir
+  // (si no, Postgres tira "ON CONFLICT DO UPDATE command cannot affect row
+  // a second time" al chocar dos filas del mismo lote entre sí).
+  const dedupMap = new Map();
+  for (const row of upsertRows) {
+    dedupMap.set(`${row.rut}|${row.local_code}|${row.fecha}|${row.acceso}`, row);
+  }
+  const dedupedRows = [...dedupMap.values()];
+
   const BATCH = 1000;
-  for (let i = 0; i < upsertRows.length; i += BATCH) {
-    const batch = upsertRows.slice(i, i + BATCH);
+  for (let i = 0; i < dedupedRows.length; i += BATCH) {
+    const batch = dedupedRows.slice(i, i + BATCH);
     const { error } = await supabase
       .from("presentismo_smu_registros")
       .upsert(batch, { onConflict: "rut,local_code,fecha,acceso" });
     if (error) throw new Error(`presentismo_smu_registros: ${error.message}`);
   }
 
-  return { total: raw.length, cargadas: upsertRows.length, descartadas, sinSala };
+  return { total: raw.length, cargadas: dedupedRows.length, descartadas, sinSala };
 }
