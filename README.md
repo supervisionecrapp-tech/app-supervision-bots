@@ -110,9 +110,9 @@ resultado.
 ## smu-presentismo-sync
 
 Corre vía [`.github/workflows/smu-presentismo-sync.yml`](./.github/workflows/smu-presentismo-sync.yml):
-cada 2 horas de 9:00 a 23:00 Chile, siempre carga el día actual — mismo
-horario que teamcore-sync. También soporta `workflow_dispatch` manual con
-una fecha específica.
+cada 1 hora de 6:00 a 23:00 Chile, siempre carga el día actual — mismo
+horario que presentismo-sync (Presentismo WM). También soporta
+`workflow_dispatch` manual con una fecha específica.
 
 El portal "GeoVictoria Externos" de SMU (externos.geovictoria.com) es una
 app ASP.NET MVC con login usuario/contraseña por formulario (sin token
