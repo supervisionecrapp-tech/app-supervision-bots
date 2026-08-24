@@ -31,16 +31,15 @@ export async function uploadSmuAccessFile({ filePath, supabaseUrl, supabaseServi
   const ws = wb.Sheets["Reporte Documentos"];
   if (!ws) throw new Error(`El archivo no tiene una hoja "Reporte Documentos" (hojas: ${wb.SheetNames.join(", ")})`);
 
-  const raw = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
-
-  // Diagnóstico temporal: el primer intento en CI contó filas pero cargó 0
-  // — hay que ver qué forma tienen realmente las claves/valores de la
-  // primera fila para saber si el problema es el nombre de columna, el
-  // formato de fecha, u otra cosa. Sacar una vez que quede confirmado.
-  if (raw.length > 0) {
-    console.log("DEBUG primera fila:", JSON.stringify(raw[0]));
-    console.log("DEBUG columnas detectadas:", Object.keys(raw[0]));
-  }
+  // header:1 en vez de leer por nombre de columna — confirmado en una
+  // corrida real (CI) que este export no siempre trae la fila 1 con texto
+  // de cabecera reconocible por sheet_to_json (salió con keys "", "_1",
+  // "_2"... y la fila 0 resultó ser la primera fila de DATOS, no la
+  // cabecera). El orden de columnas sí es fijo (Rut, Nombre, Acceso,
+  // Fecha, Local), así que se lee por posición y se descarta la fila 0
+  // sea lo que sea que tenga (título, cabecera real, o basura).
+  const rows2d = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+  const raw = rows2d.slice(1);
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -54,11 +53,13 @@ export async function uploadSmuAccessFile({ filePath, supabaseUrl, supabaseServi
   const upsertRows = [];
   let descartadas = 0;
   let sinSala = 0;
-  for (const r of raw) {
-    const rut = r["Rut"] != null ? String(r["Rut"]).trim() : null;
-    const acceso = r["Acceso"] != null ? String(r["Acceso"]).trim() : null;
-    const fecha = parseSmuFecha(r["Fecha"]);
-    const local = parseSmuLocal(r["Local"]);
+  for (const row of raw) {
+    // Orden fijo de columnas del export: Rut, Nombre, Acceso, Fecha, Local.
+    const [rutRaw, nombreRaw, accesoRaw, fechaRaw, localRaw] = row;
+    const rut = rutRaw != null ? String(rutRaw).trim() : null;
+    const acceso = accesoRaw != null ? String(accesoRaw).trim() : null;
+    const fecha = parseSmuFecha(fechaRaw);
+    const local = parseSmuLocal(localRaw);
     if (!rut || !fecha || !local || (acceso !== "Ingreso" && acceso !== "Salida")) {
       descartadas++;
       continue;
@@ -70,7 +71,7 @@ export async function uploadSmuAccessFile({ filePath, supabaseUrl, supabaseServi
       local_code: local.code,
       local_nombre: local.nombre,
       rut,
-      nombre_persona: r["Nombre"] != null ? String(r["Nombre"]).trim() : null,
+      nombre_persona: nombreRaw != null ? String(nombreRaw).trim() : null,
       acceso,
       fecha,
       cargado_at: new Date().toISOString(),
