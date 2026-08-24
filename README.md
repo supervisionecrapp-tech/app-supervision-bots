@@ -21,6 +21,12 @@ admin-panel manual.
   entrada/salida) desde el portal APE2 de Frax
   (controltienda.com/proveedor_server). Reemplaza la carga manual de Excel
   en admin-panel.html (sección "Presentismo WM — Marcaciones").
+- **[smu-presentismo-sync](./smu-presentismo-sync)** — Presentismo SMU
+  (reporte de accesos Ingreso/Salida, sin lógica de horas) desde el portal
+  "GeoVictoria Externos" (externos.geovictoria.com/Reports) — cuenta GV
+  propia de SMU, distinta de la que usa asistencia-sync por API. Reemplaza
+  la carga manual de Excel en panel-cliente.html (sección "Presentismo SMU
+  — Reporte de Accesos").
 
 Todos loguean cada corrida (éxito o error) en la tabla `bot_runs` de
 Supabase — el admin-panel.html tiene un calendario que lee de ahí para
@@ -35,6 +41,10 @@ En `Settings → Secrets and variables → Actions` de este repo:
   (teamcore-sync, venta-perdida-sync — mismo portal, mismo login).
 - `FRAX_USER` / `FRAX_PASS` — credenciales (RUT + clave) del portal APE2 de
   Frax (presentismo-sync).
+- `SMU_GV_USER` / `SMU_GV_PASS` — credenciales del portal "GeoVictoria
+  Externos" de SMU (externos.geovictoria.com), cuenta propia de SMU — no
+  confundir con `GEOVICTORIA_KEY`/`GEOVICTORIA_SECRET` de asistencia-sync,
+  que es otra cuenta GV y usa API en vez de login web (smu-presentismo-sync).
 - `SUPABASE_SERVICE_ROLE_KEY` — desde el dashboard de Supabase
   (Project Settings → API → `service_role`/`sb_secret_...`). Da acceso
   total, tratarla como una contraseña. Compartida por todos los bots.
@@ -96,6 +106,40 @@ que matchea tipo+rango es la suya. En el peor caso de carrera agarra la
 fila del otro proceso en vez de la propia, pero para el mismo rango de
 fechas el contenido es el mismo dato fuente, así que no cambia el
 resultado.
+
+## smu-presentismo-sync
+
+Corre vía [`.github/workflows/smu-presentismo-sync.yml`](./.github/workflows/smu-presentismo-sync.yml):
+cada 2 horas de 9:00 a 23:00 Chile, siempre carga el día actual — mismo
+horario que teamcore-sync. También soporta `workflow_dispatch` manual con
+una fecha específica.
+
+El portal "GeoVictoria Externos" de SMU (externos.geovictoria.com) es una
+app ASP.NET MVC con login usuario/contraseña por formulario (sin token
+anti-forgery) y sesión por cookie — no usa Playwright, todo con `fetch` +
+cookie jar manual en `smu-presentismo-sync/src/scrape.mjs`, mismo patrón
+que teamcore-sync. A pesar del nombre de dominio, esta es una cuenta
+GeoVictoria **distinta** de la que usa `asistencia-sync` por API
+(`customerapi.geovictoria.com`) — acá no hay API disponible, solo el
+reporte web.
+
+Descarga el reporte "Accesos" (`reportType=Access` en el form) vía
+`POST /Reports/AccessExcel`, hoja "Reporte Documentos" con columnas
+Rut/Nombre/Acceso(Ingreso|Salida)/Fecha/Local — sin hora, a diferencia de
+Presentismo WM. "Presentismo" acá es visitas realizadas (¿pasó esa persona
+por la sala ese día?) contra una cantidad de visitas objetivo configurada
+a mano en panel-cliente.html (`presentismo_smu_objetivo`, con vigencias),
+no horas trabajadas. Cruza por `salas.codigo_cadena` (scoped a holding
+SMU) contra el prefijo numérico de la columna Local (ej.
+"982 - TEMUCO ALEMANIA" → código "982").
+
+**Sin verificar todavía**: el body exacto de `/Reports/AccessExcel` se
+armó a partir de un "Copy as cURL" de un request real generado desde el
+navegador del usuario (no se tocó ninguna credencial para conseguirlo),
+pero la primera corrida real del bot es la que confirma que el endpoint
+devuelve el .xlsx directo y no un flujo de dos pasos como teamcore-sync
+(pedido + polling) — si falla con "no devolvió un .xlsx", revisar de
+nuevo el flujo real del portal.
 
 ## venta-perdida-sync
 
