@@ -105,18 +105,28 @@ async function downloadAccessExcel(jar, { start, end }) {
     throw new Error(`/Reports/AccessExcel devolvió status ${res.status}: ${text.slice(0, 300)}`);
   }
 
-  const contentType = res.headers.get("content-type") || "";
-  const buf = Buffer.from(await res.arrayBuffer());
+  // No devuelve el binario directo: devuelve un JSON con la URL pública del
+  // archivo ya generado en Azure Blob Storage (confirmado en una corrida
+  // real) — ej. "https://storageexternos.blob.core.windows.net/reportes/...xlsx".
+  // Mismo patrón que el bucket S3 de teamcore-sync: no hace falta reenviar
+  // cookies de sesión para bajarlo.
+  const text = await res.text();
+  let fileUrl;
+  try {
+    fileUrl = JSON.parse(text);
+  } catch {
+    throw new Error(`/Reports/AccessExcel no devolvió el JSON esperado con la URL del archivo: "${text.slice(0, 300)}"`);
+  }
+  if (typeof fileUrl !== "string" || !fileUrl.startsWith("http")) {
+    throw new Error(`/Reports/AccessExcel devolvió un valor inesperado (no es una URL): "${text.slice(0, 300)}"`);
+  }
 
-  // El endpoint debería devolver el binario .xlsx directo (Content-Type
-  // application/vnd.openxmlformats...) — si en cambio viene HTML/JSON es
-  // que el portal cambió el flujo (ej. igual que Teamcore, quizás pide
-  // "generar" antes de "descargar", o entrega una URL en vez del archivo)
-  // y hay que revisar esto de nuevo con una sesión real.
-  if (!contentType.includes("spreadsheet") && !contentType.includes("octet-stream") && buf.slice(0, 2).toString() !== "PK") {
-    throw new Error(
-      `/Reports/AccessExcel no devolvió un .xlsx (Content-Type "${contentType}", primeros bytes "${buf.slice(0, 200).toString("utf8")}") — revisar el flujo real del portal, puede haber cambiado.`,
-    );
+  const fileRes = await fetch(fileUrl);
+  if (!fileRes.ok) throw new Error(`No se pudo descargar el archivo final (status ${fileRes.status}): ${fileUrl}`);
+  const buf = Buffer.from(await fileRes.arrayBuffer());
+
+  if (buf.slice(0, 2).toString() !== "PK") {
+    throw new Error(`El archivo descargado de "${fileUrl}" no es un .xlsx válido (no empieza con la firma ZIP "PK").`);
   }
 
   return buf;
