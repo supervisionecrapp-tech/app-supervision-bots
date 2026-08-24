@@ -79,24 +79,27 @@ export async function uploadSmuAccessFile({ filePath, supabaseUrl, supabaseServi
   }
 
   // Una misma persona puede tener más de un Ingreso (o Salida) el mismo día
-  // en la misma sala — sin hora en el reporte no hay forma de distinguirlos,
-  // así que se deduplica por la misma clave del unique index antes de subir
-  // (si no, Postgres tira "ON CONFLICT DO UPDATE command cannot affect row
-  // a second time" al chocar dos filas del mismo lote entre sí).
-  const dedupMap = new Map();
+  // en la misma sala — sin hora en el reporte no hay forma de distinguirlos
+  // por timestamp. En vez de colapsarlas (perdiendo la señal de "quién
+  // marca dos veces"), se numeran como ocurrencia 1, 2, 3... en el orden en
+  // que aparecen en el archivo (mismo orden entre re-descargas del mismo
+  // día, así que un re-cargue del mismo archivo es idempotente igual).
+  const contadorPorClave = new Map();
   for (const row of upsertRows) {
-    dedupMap.set(`${row.rut}|${row.local_code}|${row.fecha}|${row.acceso}`, row);
+    const clave = `${row.rut}|${row.local_code}|${row.fecha}|${row.acceso}`;
+    const ocurrencia = (contadorPorClave.get(clave) ?? 0) + 1;
+    contadorPorClave.set(clave, ocurrencia);
+    row.ocurrencia = ocurrencia;
   }
-  const dedupedRows = [...dedupMap.values()];
 
   const BATCH = 1000;
-  for (let i = 0; i < dedupedRows.length; i += BATCH) {
-    const batch = dedupedRows.slice(i, i + BATCH);
+  for (let i = 0; i < upsertRows.length; i += BATCH) {
+    const batch = upsertRows.slice(i, i + BATCH);
     const { error } = await supabase
       .from("presentismo_smu_registros")
-      .upsert(batch, { onConflict: "rut,local_code,fecha,acceso" });
+      .upsert(batch, { onConflict: "rut,local_code,fecha,acceso,ocurrencia" });
     if (error) throw new Error(`presentismo_smu_registros: ${error.message}`);
   }
 
-  return { total: raw.length, cargadas: dedupedRows.length, descartadas, sinSala };
+  return { total: raw.length, cargadas: upsertRows.length, descartadas, sinSala };
 }
