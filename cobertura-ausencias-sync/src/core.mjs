@@ -1,4 +1,4 @@
-import { gvLogin, gvActiveUsers, gvAttendanceBookAll, gvUsersToFilas, normalizeRut } from "./gv.mjs";
+import { gvLogin, gvActiveUsers, gvAttendanceBookAll, gvUsersToFilas, normalizeRut, nowSantiagoYyyyMmDdHhMmSs, isoFromYyyyMmDd } from "./gv.mjs";
 
 // Núcleo compartido entre sync.mjs (corrida programada, mes en curso) y
 // backfill.mjs (rango manual, ej. la carga inicial de agosto completo) —
@@ -54,7 +54,17 @@ export async function sync(supabase, { desde, hasta }) {
     activeUsers.filter((u) => u.Identifier).map((u) => normalizeRut(u.Identifier)),
     { desde, hasta },
   );
-  const filas = gvUsersToFilas(attendance).filter((f) => f.absent);
+  // Una fila cuenta como "ausencia real que necesita cobertura" solo si:
+  //  - GV la marca Absent="True" (como antes), Y
+  //  - el turno ya empezó (comparado en hora Santiago) — GV puede marcar
+  //    Absent="True" para un turno de esta tarde antes de que abra la
+  //    ventana de marcaje, y eso no es una ausencia todavía, Y
+  //  - no tiene un permiso/licencia/vacaciones aprobado ese día (TimeOffs) —
+  //    si GV ya registró un permiso, no es una ausencia sin cobertura.
+  const nowSantiago = nowSantiagoYyyyMmDdHhMmSs();
+  const filas = gvUsersToFilas(attendance).filter(
+    (f) => f.absent && !f.timeoff_type && f.shift_begins && f.shift_begins <= nowSantiago,
+  );
 
   const { data: asignaciones, error: asigError } = await supabase
     .from("cbtrs_asignaciones")
@@ -90,8 +100,28 @@ export async function sync(supabase, { desde, hasta }) {
     if (error) throw new Error(error.message);
   }
 
+  // Reconciliación: si alguien que ya estaba guardado como ausente en este
+  // rango dejó de aparecer como tal en esta corrida (marcó, le aprobaron un
+  // permiso después, o el turno se movió), la fila vieja se borra siempre
+  // — no debe quedar una ausencia fantasma en cbtrs_ausencias solo porque
+  // ya tenía cobertura asignada.
+  const { data: existentes, error: existError } = await supabase
+    .from("cbtrs_ausencias")
+    .select("id, rut, fecha")
+    .gte("fecha", isoFromYyyyMmDd(desde))
+    .lte("fecha", isoFromYyyyMmDd(hasta));
+  if (existError) throw new Error(existError.message);
+  const clavesAConservar = new Set(filasParaGuardar.map((f) => `${normalizeRut(f.rut)}|${f.fecha}`));
+  const idsABorrar = (existentes ?? [])
+    .filter((e) => !clavesAConservar.has(`${normalizeRut(e.rut)}|${e.fecha}`))
+    .map((e) => e.id);
+  if (idsABorrar.length > 0) {
+    const { error: delError } = await supabase.from("cbtrs_ausencias").delete().in("id", idsABorrar);
+    if (delError) throw new Error(delError.message);
+  }
+
   const sinAsignacion = filasParaGuardar.filter((f) => f.sala_id == null).length;
-  return { activos: activeUsers.length, ausencias: filasParaGuardar.length, sinAsignacion };
+  return { activos: activeUsers.length, ausencias: filasParaGuardar.length, sinAsignacion, borradas: idsABorrar.length };
 }
 
 export async function logRun(supabase, { bot, startedAt, status, errorMessage, filasCargadas }) {

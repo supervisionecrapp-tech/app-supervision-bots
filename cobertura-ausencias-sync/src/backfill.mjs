@@ -35,7 +35,7 @@ async function main() {
 
   try {
     const result = await sync(supabase, { desde, hasta });
-    console.log(`Listo: ${result.ausencias} ausencias (${result.activos} activos en GV, ${result.sinAsignacion} sin sala/cargo asignado en Dotación).`);
+    console.log(`Listo: ${result.ausencias} ausencias (${result.activos} activos en GV, ${result.sinAsignacion} sin sala/cargo asignado en Dotación, ${result.borradas} reconciliadas/borradas).`);
     await logRun(supabase, { bot: "cobertura-ausencias-sync-backfill", startedAt, status: "success", filasCargadas: result.ausencias });
   } catch (err) {
     await logRun(supabase, {

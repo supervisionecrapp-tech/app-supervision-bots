@@ -27,6 +27,21 @@ export function primerDiaMesSantiagoYyyyMmDd() {
   return `${hoy.slice(0, 6)}01`;
 }
 
+// Comparable lexicográficamente contra shift_begins (mismo formato
+// yyyyMMddHHmmss que devuelve GV) para descartar turnos que todavía no
+// empiezan — GV puede marcar Absent="True" para un turno de esta tarde
+// antes de que siquiera abra la ventana de marcaje.
+export function nowSantiagoYyyyMmDdHhMmSs() {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hourCycle: "h23",
+  });
+  const p = Object.fromEntries(fmt.formatToParts(new Date()).map((x) => [x.type, x.value]));
+  return `${p.year}${p.month}${p.day}${p.hour}${p.minute}${p.second}`;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -115,6 +130,6 @@ export function gvUsersToFilas(users) {
   return filas;
 }
 
-function isoFromYyyyMmDd(s) {
+export function isoFromYyyyMmDd(s) {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
 }
