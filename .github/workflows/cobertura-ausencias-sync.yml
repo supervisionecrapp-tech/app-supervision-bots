@@ -1,0 +1,32 @@
+name: Cobertura Ausencias Sync
+
+on:
+  schedule:
+    # Ausencias no necesitan la cadencia horaria de asistencia_diaria —
+    # cobertura se revisa a nivel de día/semana, no en vivo. Corre 2 veces
+    # al día: 8:00 y 18:00 Chile = 12:00 y 22:00 UTC (Chile continental es
+    # UTC-4 fijo, mismo criterio que asistencia-sync.yml).
+    - cron: "0 12,22 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cobertura-ausencias-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      - name: Sync
+        env:
+          GEOVICTORIA_KEY: ${{ secrets.GEOVICTORIA_KEY }}
+          GEOVICTORIA_SECRET: ${{ secrets.GEOVICTORIA_SECRET }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync

@@ -62,12 +62,20 @@ async function sync(supabase) {
   );
 
   // gvUsersToFilas trae una fila por (persona, día con turno) en la
-  // ventana — nos quedamos con la más reciente por rut para el grupo.
+  // ventana — nos quedamos con la más reciente por rut para el grupo y el
+  // cargo (mismo criterio para los dos, PositionDescription también sale
+  // de AttendanceBook, no de ActiveUsers).
   const grupoPorRut = new Map();
+  const cargoPorRut = new Map();
   for (const fila of gvUsersToFilas(attendance)) {
-    if (!fila.grupo_gv) continue;
-    const actual = grupoPorRut.get(fila.rut);
-    if (!actual || fila.fecha > actual.fecha) grupoPorRut.set(fila.rut, { grupo: fila.grupo_gv, fecha: fila.fecha });
+    if (fila.grupo_gv) {
+      const actual = grupoPorRut.get(fila.rut);
+      if (!actual || fila.fecha > actual.fecha) grupoPorRut.set(fila.rut, { grupo: fila.grupo_gv, fecha: fila.fecha });
+    }
+    if (fila.cargo) {
+      const actual = cargoPorRut.get(fila.rut);
+      if (!actual || fila.fecha > actual.fecha) cargoPorRut.set(fila.rut, { cargo: fila.cargo, fecha: fila.fecha });
+    }
   }
 
   const nowIso = new Date().toISOString();
@@ -77,6 +85,7 @@ async function sync(supabase) {
       rut: u.Identifier,
       nombre: `${u.Name ?? ""} ${u.LastName ?? ""}`.trim(),
       grupo_gv: grupoPorRut.get(rutNormalizado)?.grupo ?? null,
+      cargo: cargoPorRut.get(rutNormalizado)?.cargo ?? null,
       activo: true,
       visto_el: hoy,
       updated_at: nowIso,

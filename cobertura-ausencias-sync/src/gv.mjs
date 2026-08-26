@@ -1,15 +1,8 @@
-// Port a Node (plain fetch, sin Playwright) de la lógica de GeoVictoria que
-// vive en supabase/functions/ausencias-hoy/index.ts — mismo comportamiento,
-// mismos límites y mitigaciones ya validados ahí (no se reinventa nada acá,
-// solo se traduce TS Deno -> JS Node):
-//   - GV limita AttendanceBook a 1500 REGISTROS por llamada (usuario x día
-//     del rango), no 1500 usuarios — el tamaño de lote se calcula según
-//     cuántos días tiene el rango pedido.
-//   - GV limita a 3 llamadas/segundo — 400ms de por medio entre lotes.
-//   - AttendanceBook exige el RUT sin puntos/guión y con "K" mayúscula.
-//   - GroupDescription solo viene poblado en AttendanceBook, no en
-//     ActiveUsers, así que hay que traer TODOS los activos y no se puede
-//     filtrar antes.
+// Copia literal de bots/asistencia-sync/src/gv.mjs — mismo comportamiento,
+// mismos límites y mitigaciones ya validados ahí. Se duplica en vez de
+// compartir porque cada bot es su propio paquete node desplegable de forma
+// independiente (mismo criterio ya usado entre asistencia-sync y los demás
+// bots de este repo).
 
 const GV_BASE = "https://customerapi.geovictoria.com/api/v1";
 const GV_MAX_REGISTROS_POR_LLAMADA = 1400;
@@ -69,8 +62,6 @@ async function gvAttendanceBookBatch(token, userIds, rango) {
   const res = await fetch(`${GV_BASE}/AttendanceBook`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    // UserIds va como string separado por comas, NO como array — un array
-    // JSON tira 400 "request body malformed" pese a lo que dice la doc.
     body: JSON.stringify({
       StartDate: `${rango.desde}000000`,
       EndDate: `${rango.hasta}235959`,
@@ -97,9 +88,6 @@ export async function gvAttendanceBookAll(token, userIds, rango) {
   return results;
 }
 
-// Solo se quedan los días con turno programado (Shifts.length>0), igual
-// que en la Edge Function — un día libre no cuenta como ausencia ni corta
-// racha, así que nunca aparece en ninguna lista, no hace falta guardarlo.
 export function gvUsersToFilas(users) {
   const filas = [];
   for (const user of users) {
@@ -115,7 +103,7 @@ export function gvUsersToFilas(users) {
         rut: user.Identifier,
         nombre,
         grupo_gv: user.GroupDescription,
-        cargo: user.PositionDescription,
+        cargo: user.PositionDescription?.trim() || null,
         fecha: isoFromYyyyMmDd((dia.Date ?? "").slice(0, 8)),
         absent: dia.Absent === "True",
         shift_begins: shifts[0].Begins,
