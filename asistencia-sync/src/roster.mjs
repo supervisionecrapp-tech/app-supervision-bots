@@ -19,9 +19,9 @@ import { gvLogin, gvActiveUsers, gvAttendanceBookAll, gvUsersToFilas, normalizeR
 //     fechas — así que no hace falta pegarle a /User/List aparte, es
 //     información redundante.
 //   - GroupDescription solo viene poblado en /AttendanceBook, escaneando
-//     los últimos VENTANA_DIAS días — deja sin grupo a quien no tuvo turno
-//     planificado en esa ventana (de licencia larga, recién ingresado,
-//     etc.), pero no hay otra fuente para ese dato en esta cuenta.
+//     una ventana ±días alrededor de hoy — deja sin grupo a quien no tuvo
+//     ni tiene turno planificado en esa ventana (deshabilitado, sin turnos
+//     este mes, etc.), pero no hay otra fuente para ese dato en esta cuenta.
 //
 // "Activo" es la fuente de verdad de GV en el momento del pull: cualquier
 // rut que ya no venga en ActiveUsers hoy se marca activo=false (nunca se
@@ -51,19 +51,22 @@ function soloFecha(contractDate) {
 }
 
 const UPSERT_BATCH = 500;
-// Subida de 14 a 30 días — más chances de cruzar contra un turno
-// planificado para gente con rotación poco frecuente (ej. cada 2-3
-// semanas), a costa de lotes más chicos por llamada a AttendanceBook
+// Ventana simétrica ±15 días (antes 30 solo hacia atrás) — el caso que
+// faltaba: alguien con fecha de contrato a futuro (ingresa en los
+// próximos días) ya puede tener turno planificado en GV antes de que
+// arranque, y solo mirando hacia atrás nunca se cruzaba. A costa de
+// lotes más chicos por llamada a AttendanceBook
 // (GV_MAX_REGISTROS_POR_LLAMADA / días) y por lo tanto más llamadas.
-const VENTANA_DIAS = 30;
+const VENTANA_DIAS_ATRAS = 15;
+const VENTANA_DIAS_ADELANTE = 15;
 
 async function sync(supabase) {
   const gvKey = requireEnv("GEOVICTORIA_KEY");
   const gvSecret = requireEnv("GEOVICTORIA_SECRET");
 
   const hoy = fechaSantiago(0);
-  const desde = fechaSantiago(-VENTANA_DIAS).replaceAll("-", "");
-  const hastaCompacto = hoy.replaceAll("-", "");
+  const desde = fechaSantiago(-VENTANA_DIAS_ATRAS).replaceAll("-", "");
+  const hastaCompacto = fechaSantiago(VENTANA_DIAS_ADELANTE).replaceAll("-", "");
 
   const token = await gvLogin(gvKey, gvSecret);
   const activos = await gvActiveUsers(token);
@@ -80,7 +83,7 @@ async function sync(supabase) {
   }
 
   // Grupo: solo sale de AttendanceBook — se toma el más reciente visto por
-  // rut en la ventana de VENTANA_DIAS (ver comentario de cabecera).
+  // rut en la ventana ±días (ver comentario de cabecera).
   const attendance = await gvAttendanceBookAll(
     token,
     activosConRut.map((u) => normalizeRut(u.Identifier)),
