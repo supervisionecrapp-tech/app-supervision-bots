@@ -86,11 +86,19 @@ async function sync(supabase) {
     activosConRut.map((u) => normalizeRut(u.Identifier)),
     { desde, hasta: hastaCompacto },
   );
+  // Clave normalizada en los dos lados del mapa — GV devuelve el
+  // Identifier de AttendanceBook con su propio casing (ej. "20759542k",
+  // con la "k" en minúscula) sin importar cómo se lo pedimos, así que si
+  // acá se guarda sin normalizar y después se busca con normalizeRut()
+  // (que pone la "k" en mayúscula), el .get() nunca calza y el grupo
+  // queda en null aunque GV sí lo haya mandado — confirmado con un caso
+  // real (20759542k) que en AttendanceBook trae grupo pero acá salía null.
   const grupoPorRut = new Map();
   for (const fila of gvUsersToFilas(attendance)) {
     if (!fila.grupo_gv) continue;
-    const actual = grupoPorRut.get(fila.rut);
-    if (!actual || fila.fecha > actual.fecha) grupoPorRut.set(fila.rut, { grupo: fila.grupo_gv, fecha: fila.fecha });
+    const rutKey = normalizeRut(fila.rut);
+    const actual = grupoPorRut.get(rutKey);
+    if (!actual || fila.fecha > actual.fecha) grupoPorRut.set(rutKey, { grupo: fila.grupo_gv, fecha: fila.fecha });
   }
 
   const nowIso = new Date().toISOString();
