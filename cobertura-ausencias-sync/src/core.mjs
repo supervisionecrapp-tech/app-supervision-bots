@@ -15,9 +15,12 @@ const UPSERT_BATCH = 500;
 /** Para un rut y fecha dados, busca la asignación vigente esa fecha
  * (fecha_inicio <= fecha <= fecha_fin, o fecha_fin null = sigue vigente).
  * Si hay más de una que matchea (no debería, pero por si acaso) se queda
- * con la de fecha_inicio más reciente. */
+ * con la de fecha_inicio más reciente. rut se normaliza porque GV no es
+ * consistente con mayúsculas/minúsculas del RUT entre sus propios
+ * endpoints — sin esto el cruce fallaba en silencio (mismo bug que el de
+ * grupo_gv en roster.mjs). */
 function resolverAsignacion(asignacionesPorRut, rut, fechaISO) {
-  const lista = asignacionesPorRut.get(rut);
+  const lista = asignacionesPorRut.get(normalizeRut(rut));
   if (!lista) return null;
   let mejor = null;
   for (const a of lista) {
@@ -59,8 +62,9 @@ export async function sync(supabase, { desde, hasta }) {
   if (asigError) throw new Error(asigError.message);
   const asignacionesPorRut = new Map();
   for (const a of asignaciones ?? []) {
-    if (!asignacionesPorRut.has(a.rut)) asignacionesPorRut.set(a.rut, []);
-    asignacionesPorRut.get(a.rut).push(a);
+    const key = normalizeRut(a.rut);
+    if (!asignacionesPorRut.has(key)) asignacionesPorRut.set(key, []);
+    asignacionesPorRut.get(key).push(a);
   }
 
   const filasParaGuardar = filas.map((f) => {
