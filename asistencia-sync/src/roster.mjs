@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { gvLogin, gvActiveUsers, gvUserList, gvAttendanceBookAll, gvUsersToFilas, normalizeRut } from "./gv.mjs";
+import { gvLogin, gvActiveUsers, gvAttendanceBookAll, gvUsersToFilas, normalizeRut } from "./gv.mjs";
 
 // Corre una vez al día (ver .github/workflows/asistencia-sync.yml) y
 // mantiene `turnos_colaboradores` — el roster que usa la app móvil para
@@ -10,21 +10,23 @@ import { gvLogin, gvActiveUsers, gvUserList, gvAttendanceBookAll, gvUsersToFilas
 // asignar dotación.
 //
 // Dos fuentes distintas, confirmado contra la cuenta real de este proyecto
-// (ver muestra cruda pedida a propósito, no la doc oficial):
-//   - /User/List (https://wiki.geovictoria.com/knowledge-base/user-list/)
-//     trae PositionDescription (cargo) y ContractDate (fecha de contrato)
-//     por usuario, sin depender de ningún rango de fechas — pero NO trae
-//     GroupDescription (la key ni siquiera existe en la respuesta).
+// (muestras crudas pedidas a propósito, no la doc oficial — que prometía
+// GroupDescription en /User/List, /User/Get y /User/ActiveUsers, y en
+// ninguno de los tres viene):
+//   - /User/ActiveUsers (el mismo llamado que ya se usa para saber quién
+//     está activo) también trae PositionDescription (cargo) y ContractDate
+//     (fecha de contrato) por usuario, sin depender de ningún rango de
+//     fechas — así que no hace falta pegarle a /User/List aparte, es
+//     información redundante.
 //   - GroupDescription solo viene poblado en /AttendanceBook, escaneando
 //     los últimos 14 días — deja sin grupo a quien no tuvo turno
 //     planificado en esa ventana (de licencia larga, recién ingresado,
-//     etc.), pero no hay otra fuente para ese dato.
+//     etc.), pero no hay otra fuente para ese dato en esta cuenta.
 //
-// "Activo" sigue siendo la fuente de verdad de GV en el momento del pull
-// (ActiveUsers, no Enabled de User/List — no se cambia ese criterio):
-// cualquier rut que ya no venga en ActiveUsers hoy se marca activo=false
-// (nunca se borra la fila, para no perder el historial de turnos_extras
-// que ya la referencia).
+// "Activo" es la fuente de verdad de GV en el momento del pull: cualquier
+// rut que ya no venga en ActiveUsers hoy se marca activo=false (nunca se
+// borra la fila, para no perder el historial de turnos_extras que ya la
+// referencia).
 
 function requireEnv(name) {
   const v = process.env[name];
@@ -60,14 +62,13 @@ async function sync(supabase) {
   const hastaCompacto = hoy.replaceAll("-", "");
 
   const token = await gvLogin(gvKey, gvSecret);
-  const [activos, userList] = await Promise.all([gvActiveUsers(token), gvUserList(token)]);
+  const activos = await gvActiveUsers(token);
   const activosConRut = activos.filter((u) => u.Identifier);
 
-  // Cargo y fecha de contrato: /User/List, todos los activos sin depender
-  // de fecha.
+  // Cargo y fecha de contrato: ya vienen en el mismo ActiveUsers de arriba,
+  // sin depender de fecha (ver comentario de cabecera).
   const datosPorRut = new Map();
-  for (const u of userList) {
-    if (!u.Identifier) continue;
+  for (const u of activosConRut) {
     datosPorRut.set(normalizeRut(u.Identifier), {
       cargo: u.PositionDescription?.trim() || null,
       fechaContrato: soloFecha(u.ContractDate),
