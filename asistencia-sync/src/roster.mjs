@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { gvLogin, gvActiveUsers, gvUserList, normalizeRut } from "./gv.mjs";
+import { gvLogin, gvActiveUsers, gvUserList, gvAttendanceBookAll, gvUsersToFilas, normalizeRut } from "./gv.mjs";
 
 // Corre una vez al día (ver .github/workflows/asistencia-sync.yml) y
 // mantiene `turnos_colaboradores` — el roster que usa la app móvil para
@@ -9,18 +9,16 @@ import { gvLogin, gvActiveUsers, gvUserList, normalizeRut } from "./gv.mjs";
 // También lo usa Cobertura para pre-llenar cargo/fecha de contrato al
 // asignar dotación.
 //
-// Primera versión de este archivo pedía solo User/ActiveUsers asumiendo
-// que traía GroupDescription (así lo describe la doc oficial, API-GV3.pdf)
-// — probado contra la cuenta real de este proyecto y NO vino poblado en
-// ningún caso (745/745 filas con grupo_gv null). Una segunda versión lo
-// sacaba escaneando AttendanceBook de los últimos 14 días, pero eso deja
-// sin grupo/cargo a cualquiera que no haya tenido un turno planificado en
-// esa ventana (de licencia larga, recién ingresado, etc.).
-//
-// Versión actual: /User/List (https://wiki.geovictoria.com/knowledge-base/user-list/)
-// trae GroupDescription, PositionDescription y ContractDate directo por
-// usuario, sin depender de ningún rango de fechas — no requiere parámetros
-// y no hay que escanear turnos.
+// Dos fuentes distintas, confirmado contra la cuenta real de este proyecto
+// (ver muestra cruda pedida a propósito, no la doc oficial):
+//   - /User/List (https://wiki.geovictoria.com/knowledge-base/user-list/)
+//     trae PositionDescription (cargo) y ContractDate (fecha de contrato)
+//     por usuario, sin depender de ningún rango de fechas — pero NO trae
+//     GroupDescription (la key ni siquiera existe en la respuesta).
+//   - GroupDescription solo viene poblado en /AttendanceBook, escaneando
+//     los últimos 14 días — deja sin grupo a quien no tuvo turno
+//     planificado en esa ventana (de licencia larga, recién ingresado,
+//     etc.), pero no hay otra fuente para ese dato.
 //
 // "Activo" sigue siendo la fuente de verdad de GV en el momento del pull
 // (ActiveUsers, no Enabled de User/List — no se cambia ese criterio):
@@ -40,42 +38,64 @@ function fechaSantiago(offsetDias = 0) {
   return fmt.format(d);
 }
 
-// ContractDate viene como "yyyy-MM-dd HH:mm:ss" — se guarda solo la fecha.
+// ContractDate viene como "yyyyMMddHHmmss" compacto (confirmado contra la
+// cuenta real, ej. "20221201000000") — NO "yyyy-MM-dd HH:mm:ss" como dice
+// la doc oficial (mismo desfase que ya tenían otros campos de fecha de GV
+// en este proyecto). Se guarda solo la fecha.
 function soloFecha(contractDate) {
   if (!contractDate) return null;
-  const m = contractDate.match(/^(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : null;
+  const m = contractDate.match(/^(\d{4})(\d{2})(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
 const UPSERT_BATCH = 500;
+const VENTANA_DIAS = 14;
 
 async function sync(supabase) {
   const gvKey = requireEnv("GEOVICTORIA_KEY");
   const gvSecret = requireEnv("GEOVICTORIA_SECRET");
 
   const hoy = fechaSantiago(0);
+  const desde = fechaSantiago(-VENTANA_DIAS).replaceAll("-", "");
+  const hastaCompacto = hoy.replaceAll("-", "");
 
   const token = await gvLogin(gvKey, gvSecret);
   const [activos, userList] = await Promise.all([gvActiveUsers(token), gvUserList(token)]);
   const activosConRut = activos.filter((u) => u.Identifier);
 
+  // Cargo y fecha de contrato: /User/List, todos los activos sin depender
+  // de fecha.
   const datosPorRut = new Map();
   for (const u of userList) {
     if (!u.Identifier) continue;
     datosPorRut.set(normalizeRut(u.Identifier), {
-      grupo: u.GroupDescription?.trim() || null,
       cargo: u.PositionDescription?.trim() || null,
       fechaContrato: soloFecha(u.ContractDate),
     });
   }
 
+  // Grupo: solo sale de AttendanceBook — se toma el más reciente visto por
+  // rut en la ventana de 14 días (ver comentario de cabecera).
+  const attendance = await gvAttendanceBookAll(
+    token,
+    activosConRut.map((u) => normalizeRut(u.Identifier)),
+    { desde, hasta: hastaCompacto },
+  );
+  const grupoPorRut = new Map();
+  for (const fila of gvUsersToFilas(attendance)) {
+    if (!fila.grupo_gv) continue;
+    const actual = grupoPorRut.get(fila.rut);
+    if (!actual || fila.fecha > actual.fecha) grupoPorRut.set(fila.rut, { grupo: fila.grupo_gv, fecha: fila.fecha });
+  }
+
   const nowIso = new Date().toISOString();
   const filas = activosConRut.map((u) => {
-    const datos = datosPorRut.get(normalizeRut(u.Identifier));
+    const rutNormalizado = normalizeRut(u.Identifier);
+    const datos = datosPorRut.get(rutNormalizado);
     return {
       rut: u.Identifier,
       nombre: `${u.Name ?? ""} ${u.LastName ?? ""}`.trim(),
-      grupo_gv: datos?.grupo ?? null,
+      grupo_gv: grupoPorRut.get(rutNormalizado)?.grupo ?? null,
       cargo: datos?.cargo ?? null,
       fecha_contrato: datos?.fechaContrato ?? null,
       activo: true,
