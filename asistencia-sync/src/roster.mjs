@@ -1,32 +1,32 @@
 import { createClient } from "@supabase/supabase-js";
-import { gvLogin, gvActiveUsers, gvAttendanceBookAll, gvUsersToFilas, normalizeRut } from "./gv.mjs";
+import { gvLogin, gvActiveUsers, gvUserList, normalizeRut } from "./gv.mjs";
 
 // Corre una vez al día (ver .github/workflows/asistencia-sync.yml) y
 // mantiene `turnos_colaboradores` — el roster que usa la app móvil para
 // elegir a quién asignarle un Turno Extra, scoped por supervisor vía
 // grupo_gv → salas.grupo_gv_id → salas.supervisor_id (ver
 // turnosQueries.ts / migración 20260821020000_turnos_extras_migracion.sql).
+// También lo usa Cobertura para pre-llenar cargo/fecha de contrato al
+// asignar dotación.
 //
 // Primera versión de este archivo pedía solo User/ActiveUsers asumiendo
 // que traía GroupDescription (así lo describe la doc oficial, API-GV3.pdf)
 // — probado contra la cuenta real de este proyecto y NO vino poblado en
-// ningún caso (745/745 filas con grupo_gv null), dejando el picker vacío
-// para todos los supervisores. Se corrige acá usando el mismo mecanismo
-// que ya funciona en producción para asistencia_diaria: GroupDescription
-// solo viene poblado en /AttendanceBook, no en /ActiveUsers (el comentario
-// original de gv.mjs/ausencias-hoy tenía razón después de todo).
+// ningún caso (745/745 filas con grupo_gv null). Una segunda versión lo
+// sacaba escaneando AttendanceBook de los últimos 14 días, pero eso deja
+// sin grupo/cargo a cualquiera que no haya tenido un turno planificado en
+// esa ventana (de licencia larga, recién ingresado, etc.).
 //
-// Ventana de 14 días (no solo "hoy") para no perder de vista a alguien con
-// turno rotativo que justo no trabajó en el rango pedido — se toma el
-// grupo más reciente visto por persona. Todos los activos de ActiveUsers
-// quedan igual en el roster aunque no tengan grupo en la ventana (mejor
-// tenerlos sin grupo, filtrables solo por admin, que no tenerlos).
+// Versión actual: /User/List (https://wiki.geovictoria.com/knowledge-base/user-list/)
+// trae GroupDescription, PositionDescription y ContractDate directo por
+// usuario, sin depender de ningún rango de fechas — no requiere parámetros
+// y no hay que escanear turnos.
 //
-// "Activo" es la fuente de verdad de GV en el momento del pull: cualquier
-// rut que ya no venga en ActiveUsers hoy se marca activo=false (nunca se
-// borra la fila, para no perder el historial de turnos_extras que ya la
-// referencia) — así un supervisor no ve para elegir a alguien que ya no
-// trabaja ahí, a pedido explícito del usuario.
+// "Activo" sigue siendo la fuente de verdad de GV en el momento del pull
+// (ActiveUsers, no Enabled de User/List — no se cambia ese criterio):
+// cualquier rut que ya no venga en ActiveUsers hoy se marca activo=false
+// (nunca se borra la fila, para no perder el historial de turnos_extras
+// que ya la referencia).
 
 function requireEnv(name) {
   const v = process.env[name];
@@ -40,52 +40,44 @@ function fechaSantiago(offsetDias = 0) {
   return fmt.format(d);
 }
 
+// ContractDate viene como "yyyy-MM-dd HH:mm:ss" — se guarda solo la fecha.
+function soloFecha(contractDate) {
+  if (!contractDate) return null;
+  const m = contractDate.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
 const UPSERT_BATCH = 500;
-const VENTANA_DIAS = 14;
 
 async function sync(supabase) {
   const gvKey = requireEnv("GEOVICTORIA_KEY");
   const gvSecret = requireEnv("GEOVICTORIA_SECRET");
 
   const hoy = fechaSantiago(0);
-  const desde = fechaSantiago(-VENTANA_DIAS).replaceAll("-", "");
-  const hastaCompacto = hoy.replaceAll("-", "");
 
   const token = await gvLogin(gvKey, gvSecret);
-  const activos = await gvActiveUsers(token);
+  const [activos, userList] = await Promise.all([gvActiveUsers(token), gvUserList(token)]);
   const activosConRut = activos.filter((u) => u.Identifier);
 
-  const attendance = await gvAttendanceBookAll(
-    token,
-    activosConRut.map((u) => normalizeRut(u.Identifier)),
-    { desde, hasta: hastaCompacto },
-  );
-
-  // gvUsersToFilas trae una fila por (persona, día con turno) en la
-  // ventana — nos quedamos con la más reciente por rut para el grupo y el
-  // cargo (mismo criterio para los dos, PositionDescription también sale
-  // de AttendanceBook, no de ActiveUsers).
-  const grupoPorRut = new Map();
-  const cargoPorRut = new Map();
-  for (const fila of gvUsersToFilas(attendance)) {
-    if (fila.grupo_gv) {
-      const actual = grupoPorRut.get(fila.rut);
-      if (!actual || fila.fecha > actual.fecha) grupoPorRut.set(fila.rut, { grupo: fila.grupo_gv, fecha: fila.fecha });
-    }
-    if (fila.cargo) {
-      const actual = cargoPorRut.get(fila.rut);
-      if (!actual || fila.fecha > actual.fecha) cargoPorRut.set(fila.rut, { cargo: fila.cargo, fecha: fila.fecha });
-    }
+  const datosPorRut = new Map();
+  for (const u of userList) {
+    if (!u.Identifier) continue;
+    datosPorRut.set(normalizeRut(u.Identifier), {
+      grupo: u.GroupDescription?.trim() || null,
+      cargo: u.PositionDescription?.trim() || null,
+      fechaContrato: soloFecha(u.ContractDate),
+    });
   }
 
   const nowIso = new Date().toISOString();
   const filas = activosConRut.map((u) => {
-    const rutNormalizado = normalizeRut(u.Identifier);
+    const datos = datosPorRut.get(normalizeRut(u.Identifier));
     return {
       rut: u.Identifier,
       nombre: `${u.Name ?? ""} ${u.LastName ?? ""}`.trim(),
-      grupo_gv: grupoPorRut.get(rutNormalizado)?.grupo ?? null,
-      cargo: cargoPorRut.get(rutNormalizado)?.cargo ?? null,
+      grupo_gv: datos?.grupo ?? null,
+      cargo: datos?.cargo ?? null,
+      fecha_contrato: datos?.fechaContrato ?? null,
       activo: true,
       visto_el: hoy,
       updated_at: nowIso,

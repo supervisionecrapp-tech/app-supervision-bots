@@ -65,6 +65,23 @@ export async function gvActiveUsers(token) {
   return res.json();
 }
 
+// /User/List trae GroupDescription, PositionDescription y ContractDate
+// directo por usuario, sin depender de que haya tenido un turno planificado
+// en algún rango de fechas — a diferencia de escanear AttendanceBook (lo
+// que hacía roster.mjs antes), esto no deja a nadie sin grupo/cargo solo
+// porque no trabajó en la ventana consultada. Ver
+// https://wiki.geovictoria.com/knowledge-base/user-list/ — no requiere
+// parámetros en el body.
+export async function gvUserList(token) {
+  const res = await fetch(`${GV_BASE}/User/List`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`GV User/List falló: ${res.status} — ${await res.text()}`);
+  return res.json();
+}
+
 async function gvAttendanceBookBatch(token, userIds, rango) {
   const res = await fetch(`${GV_BASE}/AttendanceBook`, {
     method: "POST",
@@ -115,7 +132,6 @@ export function gvUsersToFilas(users) {
         rut: user.Identifier,
         nombre,
         grupo_gv: user.GroupDescription,
-        cargo: user.PositionDescription,
         fecha: isoFromYyyyMmDd((dia.Date ?? "").slice(0, 8)),
         absent: dia.Absent === "True",
         shift_begins: shifts[0].Begins,
