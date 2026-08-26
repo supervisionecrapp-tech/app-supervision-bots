@@ -19,7 +19,7 @@ import { gvLogin, gvActiveUsers, gvAttendanceBookAll, gvUsersToFilas, normalizeR
 //     fechas — así que no hace falta pegarle a /User/List aparte, es
 //     información redundante.
 //   - GroupDescription solo viene poblado en /AttendanceBook, escaneando
-//     los últimos 14 días — deja sin grupo a quien no tuvo turno
+//     los últimos VENTANA_DIAS días — deja sin grupo a quien no tuvo turno
 //     planificado en esa ventana (de licencia larga, recién ingresado,
 //     etc.), pero no hay otra fuente para ese dato en esta cuenta.
 //
@@ -51,7 +51,11 @@ function soloFecha(contractDate) {
 }
 
 const UPSERT_BATCH = 500;
-const VENTANA_DIAS = 14;
+// Subida de 14 a 30 días — más chances de cruzar contra un turno
+// planificado para gente con rotación poco frecuente (ej. cada 2-3
+// semanas), a costa de lotes más chicos por llamada a AttendanceBook
+// (GV_MAX_REGISTROS_POR_LLAMADA / días) y por lo tanto más llamadas.
+const VENTANA_DIAS = 30;
 
 async function sync(supabase) {
   const gvKey = requireEnv("GEOVICTORIA_KEY");
@@ -76,7 +80,7 @@ async function sync(supabase) {
   }
 
   // Grupo: solo sale de AttendanceBook — se toma el más reciente visto por
-  // rut en la ventana de 14 días (ver comentario de cabecera).
+  // rut en la ventana de VENTANA_DIAS (ver comentario de cabecera).
   const attendance = await gvAttendanceBookAll(
     token,
     activosConRut.map((u) => normalizeRut(u.Identifier)),
