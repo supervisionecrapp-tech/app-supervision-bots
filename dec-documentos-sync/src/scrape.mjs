@@ -6,6 +6,14 @@ const PORTAL_URL = "https://5.dec.cl/portal";
 const REPORTERIA_URL = "https://5.dec.cl/reporteria";
 const LISTADO_URL = "https://5.dec.cl/reporteria/listado_reportes";
 
+// El botón de submit del login federado cambia de texto entre pasos
+// ("ENTRAR" para RUT, "CONTINUAR" para clave — confirmado en vivo) — se
+// prueba con los nombres conocidos en vez de hardcodear uno solo.
+async function clickSubmit(page) {
+  const btn = page.locator("button:visible").filter({ hasText: /^(ENTRAR|CONTINUAR)$/ });
+  await btn.first().click();
+}
+
 // Todo lo de acá abajo (ids, endpoints, texto del modal) se confirmó
 // interactuando con el portal real (sesión SOLUC_ESPECIALIZADAS_OUT_SA,
 // 2026-08-27) salvo el campo de clave de Acepta — ver el comentario grande
@@ -70,16 +78,28 @@ async function login(page, decUser, decPass, downloadDir) {
   await debugShot(page, downloadDir, "01-form-login-federado");
 
   // Confirmado en vivo: primero hay que elegir país (opción "Chile") y
-  // recién ahí aparece el input de RUT (placeholder real "Ingresa tu RUT")
-  // y el botón "ENTRAR".
+  // recién ahí aparece el input de RUT (placeholder real
+  // "Ingresa tu RUT/DNI", id="taxpayer_id") y el botón "ENTRAR".
+  //
+  // OJO (confirmado por la corrida #5 real): el widget a veces no
+  // reacciona al primer selectOption — el campo de RUT queda en el DOM
+  // pero `hidden` (visto 2 de 3 intentos en la misma corrida, así que es
+  // flaky, no un fallo sistemático). Un segundo selectOption alcanzó en la
+  // práctica para destrabarlo.
   await paisSelect.selectOption({ label: "Chile" });
   await debugShot(page, downloadDir, "02-pais-seleccionado");
 
-  const rutInput = page.getByPlaceholder("Ingresa tu RUT");
-  await rutInput.waitFor({ timeout: 10000 });
+  const rutInput = page.getByPlaceholder("Ingresa tu RUT/DNI");
+  try {
+    await rutInput.waitFor({ state: "visible", timeout: 8000 });
+  } catch {
+    console.log("Campo de RUT seguía oculto tras seleccionar país, reintentando selectOption…");
+    await paisSelect.selectOption({ label: "Chile" });
+    await rutInput.waitFor({ state: "visible", timeout: 15000 });
+  }
   await rutInput.fill(decUser);
   console.log("RUT completado, clic ENTRAR…");
-  await page.getByRole("button", { name: "ENTRAR" }).click();
+  await clickSubmit(page);
   await debugShot(page, downloadDir, "03-tras-rut-entrar");
 
   // Confirmar que apareció el campo de clave antes de tocarlo — si no, el
@@ -95,9 +115,13 @@ async function login(page, decUser, decPass, downloadDir) {
     );
   }
   await claveInput.fill(decPass);
-  console.log("Clave completada, clic ENTRAR…");
+  // OJO (confirmado en vivo por el usuario mirando la corrida real): el
+  // botón de este paso NO se llama "ENTRAR" como el del RUT — es
+  // "CONTINUAR". clickSubmit() prueba los dos nombres en vez de asumir uno
+  // solo, para no repetir este mismo error si vuelve a cambiar el texto.
+  console.log("Clave completada, clic CONTINUAR…");
   await debugShot(page, downloadDir, "04-tras-clave");
-  await page.getByRole("button", { name: "ENTRAR" }).click();
+  await clickSubmit(page);
 
   // El reCAPTCHA visible en esta pantalla es la mayor incógnita de este
   // login (no se confirmó si es v2 checkbox o v3 invisible) — si bloquea a
