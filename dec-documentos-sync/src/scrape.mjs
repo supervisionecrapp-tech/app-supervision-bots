@@ -188,6 +188,24 @@ async function login(page, decUser, decPass, downloadDir) {
       `El login no terminó adentro del portal — la URL final (${page.url()}) coincide con /5\\.dec\\.cl/ pero es la pantalla de login, no el portal (revisar debug-05-post-login.png).`,
     );
   }
+
+  // Confirmado en vivo (con el usuario logueado, inspeccionando el DOM
+  // real): recién logueada por Identidad Digital, la cuenta queda en su
+  // contexto PERSONAL (el propio RUT, "Mis Documentos" en 0/0/0/0) en vez
+  // de la empresa SOLUC_ESPECIALIZADAS_OUT_SA — confirmado que en ese
+  // contexto personal /reporteria REDIRIGE de vuelta a /portal sin pintar
+  // el form (la causa real del timeout en #filtro-reporte de corridas
+  // anteriores, que hasta ahora se atribuía erróneamente a un selector
+  // roto en Reportería). Hay que cambiar de empresa ANTES de ir a
+  // Reportería: dropdown del perfil (`li.datos-usuarios button.dropdown-toggle`)
+  // → link `a.change-institution` con texto "SOLUC_ESPECIALIZADAS_OUT_SA".
+  await page.locator("li.datos-usuarios button.dropdown-toggle").click();
+  await page
+    .locator("a.change-institution", { hasText: "SOLUC_ESPECIALIZADAS_OUT_SA" })
+    .click();
+  await page.waitForLoadState("networkidle").catch(() => {});
+  console.log("Sesión cambiada a SOLUC_ESPECIALIZADAS_OUT_SA.");
+  await debugShot(page, downloadDir, "06-sesion-empresa");
 }
 
 async function triggerReporte(page, downloadDir, waitMultiplier) {
