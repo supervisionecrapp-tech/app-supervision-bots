@@ -27,11 +27,61 @@ resolverlo y simplemente no encontró ninguno esa vez).
 from __future__ import annotations
 
 import datetime as dt
+import re
 from pathlib import Path
+from random import randint
 
 from scrapling.fetchers import StealthyFetcher
 
 BASE_URL = "https://www.controltienda.com/proveedor_server"
+
+# Mismo patrón que usa Scrapling internamente para ubicar el iframe del
+# challenge de Cloudflare (`__CF_PATTERN__` en
+# scrapling/engines/_browsers/_stealth.py).
+_CF_IFRAME_PATTERN = re.compile(r"^https?://challenges\.cloudflare\.com/cdn-cgi/challenge-platform/.*")
+
+
+def _click_turnstile_si_aparece(page, captura, *, intentos_espera: int = 20) -> bool:
+    """Busca el iframe de Cloudflare Turnstile y clickea su checkbox si
+    aparece. Devuelve True si encontró y clickeó uno, False si no apareció
+    ninguno en el tiempo de espera (~10s con `intentos_espera=20`).
+
+    Confirmado leyendo el código fuente de Scrapling instalado
+    (`scrapling/engines/_browsers/_stealth.py`, `_cloudflare_solver` /
+    `StealthySession.fetch`): `solve_cloudflare=True` solo corre ese
+    solver UNA VEZ, inmediatamente después de la navegación inicial a
+    `login.php` y ANTES de ejecutar nuestro `page_action` — nunca se
+    vuelve a invocar durante `page_action`. Este portal en particular no
+    muestra ningún challenge en la carga inicial (confirmado en
+    `01_login_page` de los pantallazos: formulario limpio), sino que
+    dispara un Turnstile recién al hacer submit del login (visto en
+    `02_despues_click_login`: banner "Verificación de seguridad fallida"
+    seguido del checkbox "Verify you are human" en
+    `03_timeout_esperando_index` — momento en el que `solve_cloudflare`
+    ya terminó de correr y no vuelve a intervenir. Por eso hace falta
+    resolverlo a mano acá, replicando la misma técnica de click
+    coordinado sobre el iframe (bounding box + click con offset
+    aleatorio) que usa Scrapling para el challenge inicial."""
+    iframe = None
+    for _ in range(intentos_espera):
+        iframe = page.frame(url=_CF_IFRAME_PATTERN)
+        if iframe is not None:
+            break
+        page.wait_for_timeout(500)
+    if iframe is None:
+        return False
+
+    frame_element = iframe.frame_element()
+    box = frame_element.bounding_box()
+    if not box:
+        return False
+
+    x = box["x"] + randint(26, 28)
+    y = box["y"] + randint(25, 27)
+    page.mouse.click(x, y, delay=randint(100, 200), button="left")
+    captura(page, "turnstile_clickeado")
+    page.wait_for_timeout(1000)
+    return True
 
 
 def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path) -> Path:
@@ -99,13 +149,23 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     page.click("button.btn-login")
     captura(page, "02_despues_click_login")
 
-    # Timeout largo: el desafío de Cloudflare puede tardar antes de
-    # redirigir, aun con solve_cloudflare=True resolviéndolo.
-    try:
-        page.wait_for_url("**/index.php**", timeout=45000)
-    except Exception:
-        captura(page, "03_timeout_esperando_index")
-        raise
+    # El submit del login dispara acá (no en la carga inicial de
+    # login.php) un Turnstile embebido que `solve_cloudflare=True` no
+    # cubre — ver el docstring de `_click_turnstile_si_aparece` para el
+    # detalle. Reintentamos el wait_for_url varias veces, clickeando el
+    # checkbox si aparece entre intento e intento, en vez de un único
+    # timeout largo.
+    max_intentos_turnstile = 3
+    for intento in range(1, max_intentos_turnstile + 1):
+        try:
+            page.wait_for_url("**/index.php**", timeout=15000)
+            break
+        except Exception:
+            if intento == max_intentos_turnstile:
+                captura(page, "03_timeout_esperando_index")
+                raise
+            captura(page, f"03_turnstile_intento_{intento}")
+            _click_turnstile_si_aparece(page, captura)
     captura(page, "03_index_ok")
 
     # Aviso de "cuenta con pago pendiente" — no está confirmado que
