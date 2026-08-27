@@ -2,14 +2,12 @@ name: DEC Documentos Sync
 
 on:
   schedule:
-    # Cada 3 horas (a pedido explícito) — el offset UTC-3 de Chile
-    # (continental, sin horario de verano) no rompe el patrón de 3 en 3,
-    # así que no hace falta convertir a hora Chile. Corre a las xx:00 UTC
-    # = xx-3:00 Chile, ej. 11:00 UTC = 08:00 Chile, 14:00 UTC = 11:00
-    # Chile, etc. Antes de las 13:00 Chile (16:00 UTC) ya corrió al menos
-    # una vez desde medianoche, para que notificaciones-documentos.yml
-    # (13:00 Chile) lea datos frescos del día.
-    - cron: "0 */3 * * *"
+    # Cada 1 hora, 6:00 a 23:00 Chile — mismo patrón y mismo horario que
+    # presentismo-sync.yml/smu-presentismo-sync.yml (a pedido explícito:
+    # "deja la corrida al igual que presentismo cada 1 hora"). Chile
+    # continental es UTC-4 fijo (sin horario de verano, mismo criterio que
+    # el resto de los bots): 6-23 Chile = 10-23,0-3 UTC.
+    - cron: "0 10-23,0-3 * * *"
   workflow_dispatch: {}
 
 jobs:

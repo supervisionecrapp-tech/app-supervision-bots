@@ -153,8 +153,9 @@ nuevo el flujo real del portal.
 ## dec-documentos-sync
 
 Corre vía [`.github/workflows/dec-documentos-sync.yml`](./.github/workflows/dec-documentos-sync.yml):
-cada 3 horas (a pedido explícito, reemplaza la corrida diaria única del
-diseño original), `workflow_dispatch` manual soportado sin inputs.
+cada 1 hora, 6:00 a 23:00 Chile — mismo horario que presentismo-sync.yml
+(a pedido explícito, reemplaza la corrida diaria única del diseño
+original), `workflow_dispatch` manual soportado sin inputs.
 
 El portal DEC (5.dec.cl, firma electrónica de documentos — Sovos/Autentia)
 solo deja entrar a la cuenta `SOLUC_ESPECIALIZADAS_OUT_SA` por la tab
