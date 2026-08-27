@@ -42,3 +42,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FECHA: ${{ github.event.inputs.fecha }}
         run: python src/sync.py
+
+      # Pantallazos de cada paso del flujo (login, index, reportes, export),
+      # más uno extra si el flujo tira excepción — para diagnosticar en qué
+      # paso exacto falló sin poder mirar la pantalla en vivo. Se suben
+      # siempre (no solo en error) porque hay reintentos internos y el
+      # último intento exitoso también puede traer pantallazos útiles de
+      # intentos previos fallidos.
+      - name: Subir pantallazos de diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: presentismo-sync-screenshots-${{ github.run_id }}-${{ github.run_attempt }}
+          path: presentismo-sync/downloads/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14

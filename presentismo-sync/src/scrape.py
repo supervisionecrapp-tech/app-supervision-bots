@@ -43,64 +43,29 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     download_dir.mkdir(parents=True, exist_ok=True)
     fecha_fi = fecha_ff - dt.timedelta(days=1)
 
+    screenshots_dir = download_dir / "screenshots"
+    screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+    def captura(page, paso: str) -> None:
+        """Pantallazo de diagnóstico best-effort (nunca rompe el flujo si
+        falla, ej. página ya cerrada) — para poder ver en qué paso exacto
+        quedó el portal cuando el bot falla (challenge de Cloudflare,
+        cambio de layout, etc.), ya que en GitHub Actions no hay forma de
+        mirar la pantalla en vivo."""
+        try:
+            ts = dt.datetime.now(dt.timezone.utc).strftime("%H%M%S")
+            page.screenshot(path=str(screenshots_dir / f"{ts}_{paso}.png"), full_page=True)
+        except Exception as err:  # noqa: BLE001
+            print(f"No se pudo capturar pantallazo ({paso}): {err}")
+
     downloaded_path: dict[str, Path] = {}
 
     def interactuar(page):
-        page.goto(f"{BASE_URL}/login.php")
-
-        # El formulario trae un campo señuelo (#usuario_v2 — 0x0 vía CSS
-        # pero no display:none, autocomplete="username") además del real
-        # (#usuario, autocomplete="organization"): un honeypot anti-bot
-        # confirmado inspeccionando el DOM en vivo. Llenamos por selector
-        # específico, nunca lo tocamos, igual que un usuario real.
-        page.fill("#usuario", frax_user)
-        page.fill("#clave", frax_pass)
-        page.click("button.btn-login")
-
-        # Timeout largo: el desafío de Cloudflare puede tardar antes de
-        # redirigir, aun con solve_cloudflare=True resolviéndolo.
-        page.wait_for_url("**/index.php**", timeout=45000)
-
-        # Aviso de "cuenta con pago pendiente" — no está confirmado que
-        # aparezca siempre, por eso timeout corto y sin bloquear el flujo.
-        cerrar_impago = page.locator("#btnCerrarImpago")
         try:
-            if cerrar_impago.is_visible(timeout=5000):
-                cerrar_impago.click()
-                page.wait_for_timeout(300)
+            _interactuar_paso(page, captura, downloaded_path, frax_user=frax_user, frax_pass=frax_pass, fecha_fi=fecha_fi, download_dir=download_dir)
         except Exception:
-            pass
-
-        page.goto(f"{BASE_URL}/reportes/")
-        page.wait_for_selector("#btn-export-detalle", timeout=20000)
-
-        # Inputs type=date nativos (value YYYY-MM-DD) — sin overlay de
-        # calendario que cerrar. "hasta" (#f-ff) se deja tal cual lo trae
-        # el portal por default (hoy), a pedido explícito: no se toca.
-        page.fill("#f-fi", fecha_fi.isoformat())
-        page.click("#btn-aplicar")
-
-        # La tabla "Detalle de marcas" se recarga vía AJAX (DataTables
-        # server-side) — no hay selector confiable de "listo".
-        page.wait_for_timeout(3000)
-
-        file_path = download_dir / f"presentismo-{fecha_fi.isoformat()}_{fecha_ff.isoformat()}.xlsx"
-        with page.expect_download() as download_info:
-            page.click("#btn-export-detalle")
-        download = download_info.value
-        download.save_as(str(file_path))
-        downloaded_path["path"] = file_path
-
-        # Scrapling intenta leer el contenido final de la página después de
-        # que `page_action` termina, para armar su objeto Response — como
-        # acá ya navegamos varias veces (login.php -> index.php ->
-        # reportes/) y la última acción fue una descarga (no una
-        # navegación normal), esa lectura fallaba con "Protocol error...
-        # Response body is not available" (no rompe el flujo, pero ensucia
-        # el log). Dejar la página en un estado neutro y quieto antes de
-        # devolverla evita esa lectura fallida.
-        page.goto("about:blank")
-
+            captura(page, "error_fatal")
+            raise
         return page
 
     StealthyFetcher.fetch(
@@ -118,3 +83,78 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     if "path" not in downloaded_path:
         raise RuntimeError("El flujo terminó sin descargar el archivo (page_action no llegó a exportar).")
     return downloaded_path["path"]
+
+
+def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pass: str, fecha_fi: dt.date, download_dir: Path) -> None:
+    page.goto(f"{BASE_URL}/login.php")
+    captura(page, "01_login_page")
+
+    # El formulario trae un campo señuelo (#usuario_v2 — 0x0 vía CSS
+    # pero no display:none, autocomplete="username") además del real
+    # (#usuario, autocomplete="organization"): un honeypot anti-bot
+    # confirmado inspeccionando el DOM en vivo. Llenamos por selector
+    # específico, nunca lo tocamos, igual que un usuario real.
+    page.fill("#usuario", frax_user)
+    page.fill("#clave", frax_pass)
+    page.click("button.btn-login")
+    captura(page, "02_despues_click_login")
+
+    # Timeout largo: el desafío de Cloudflare puede tardar antes de
+    # redirigir, aun con solve_cloudflare=True resolviéndolo.
+    try:
+        page.wait_for_url("**/index.php**", timeout=45000)
+    except Exception:
+        captura(page, "03_timeout_esperando_index")
+        raise
+    captura(page, "03_index_ok")
+
+    # Aviso de "cuenta con pago pendiente" — no está confirmado que
+    # aparezca siempre, por eso timeout corto y sin bloquear el flujo.
+    cerrar_impago = page.locator("#btnCerrarImpago")
+    try:
+        if cerrar_impago.is_visible(timeout=5000):
+            cerrar_impago.click()
+            page.wait_for_timeout(300)
+            captura(page, "04_despues_cerrar_impago")
+    except Exception:
+        pass
+
+    page.goto(f"{BASE_URL}/reportes/")
+    try:
+        page.wait_for_selector("#btn-export-detalle", timeout=20000)
+    except Exception:
+        captura(page, "05_timeout_esperando_reportes")
+        raise
+    captura(page, "05_reportes_ok")
+
+    # Inputs type=date nativos (value YYYY-MM-DD) — sin overlay de
+    # calendario que cerrar. "hasta" (#f-ff) se deja tal cual lo trae
+    # el portal por default (hoy), a pedido explícito: no se toca.
+    page.fill("#f-fi", fecha_fi.isoformat())
+    page.click("#btn-aplicar")
+
+    # La tabla "Detalle de marcas" se recarga vía AJAX (DataTables
+    # server-side) — no hay selector confiable de "listo".
+    page.wait_for_timeout(3000)
+    captura(page, "06_antes_exportar")
+
+    file_path = download_dir / f"presentismo-{fecha_fi.isoformat()}_{fecha_ff.isoformat()}.xlsx"
+    try:
+        with page.expect_download() as download_info:
+            page.click("#btn-export-detalle")
+        download = download_info.value
+        download.save_as(str(file_path))
+    except Exception:
+        captura(page, "07_error_exportar")
+        raise
+    downloaded_path["path"] = file_path
+
+    # Scrapling intenta leer el contenido final de la página después de
+    # que `page_action` termina, para armar su objeto Response — como
+    # acá ya navegamos varias veces (login.php -> index.php ->
+    # reportes/) y la última acción fue una descarga (no una
+    # navegación normal), esa lectura fallaba con "Protocol error...
+    # Response body is not available" (no rompe el flujo, pero ensucia
+    # el log). Dejar la página en un estado neutro y quieto antes de
+    # devolverla evita esa lectura fallida.
+    page.goto("about:blank")
