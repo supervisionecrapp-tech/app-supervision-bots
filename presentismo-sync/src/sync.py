@@ -31,9 +31,17 @@ def read_fecha() -> dt.date:
     return dt.datetime.now(SANTIAGO).date()
 
 
-def with_retries(intentar, max_intentos: int = 4, espera_base_s: int = 90):
+def with_retries(intentar, max_intentos: int = 2, espera_base_s: int = 90):
     """Reintenta `intentar()` hasta `max_intentos` veces, con espera
     EXPONENCIAL (90s, 180s, 360s, ...) entre intentos.
+
+    Solo 2 intentos, a propósito: el workflow corre cada hora y el filtro
+    del portal siempre va desde el día anterior, así que una corrida que
+    falla no pierde datos — la siguiente vuelve a traer el rango completo
+    y el upsert (rut_persona, local_code, entrada) deduplica. Insistir
+    más dentro de la misma corrida no gana nada y sí alimenta la escalada
+    del challenge: con 4 intentos eran hasta 72 logins fallidos por día
+    desde la misma IP de GitHub Actions.
 
     Backoff exponencial en vez de lineal, a propósito: confirmado a mano
     por el usuario (corriendo el login manualmente muchas veces seguidas
