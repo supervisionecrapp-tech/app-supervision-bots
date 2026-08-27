@@ -7,19 +7,30 @@ const REPORTERIA_URL = "https://5.dec.cl/reporteria";
 const LISTADO_URL = "https://5.dec.cl/reporteria/listado_reportes";
 
 // El botón de submit del login federado cambia de texto entre pasos
-// ("ENTRAR" para RUT, "CONTINUAR" para clave — confirmado en vivo) — se
+// ("Entrar" para RUT, "Continuar" para clave — confirmado en vivo) — se
 // prueba con los nombres conocidos en vez de hardcodear uno solo.
 //
-// OJO (confirmado por la corrida #7 real, que se colgó acá pese a que la
-// captura debug-99-error.png mostraba el botón "ENTRAR" perfectamente
-// visible en pantalla): el form es server-rendered clásico, el control
-// real es un <input type="submit"/"button" value="ENTRAR"> — NO un
-// <button>ENTRAR</button>. `page.locator("button:visible")` solo matchea
-// la etiqueta <button> y por eso nunca encontraba nada. getByRole SÍ
-// reconoce <input type=submit> por su rol ARIA (button), sea cual sea la
-// etiqueta HTML real — volver a esto en vez de un selector de tag fijo.
+// Confirmado inspeccionando el DOM real (servicios.dec.cl/oauth2/v2/auth/login,
+// javascript_tool, no adivinado): el control es
+// `<input id="buttonLogin" type="submit" class="... g-recaptcha ..." value="Entrar">`
+// — un <input>, no un <button> (por eso `page.locator("button:visible")`
+// nunca lo encontraba en una corrida anterior). Y el texto real es
+// "Entrar" con mayúscula inicial, NO "ENTRAR" — se ve todo en mayúsculas
+// en pantalla por `text-transform` de CSS, pero el DOM/accessible name es
+// case-sensitive distinto (por eso getByRole con el regex en mayúsculas
+// tampoco lo encontraba, pese a que las capturas mostraban el botón
+// perfectamente visible). El regex ahora es case-insensitive.
+//
+// OJO: el botón tiene la clase `g-recaptcha` de Google reCAPTCHA
+// directamente encima — el click dispara la verificación del captcha
+// ANTES de que el form se envíe de verdad. Si tras este fix el click deja
+// de tirar error pero el login igual no avanza (se cuelga después de
+// clickear, sin más pistas de selector), es evidencia de que el captcha
+// está bloqueando a Playwright headless — ahí hay que migrar a Scrapling
+// (Python+Camoufox, como bots/presentismo-sync) en vez de seguir
+// ajustando selectores.
 async function clickSubmit(page) {
-  const btn = page.getByRole("button", { name: /^(ENTRAR|CONTINUAR)$/ });
+  const btn = page.getByRole("button", { name: /^(entrar|continuar)$/i });
   await btn.first().click();
 }
 
@@ -87,33 +98,32 @@ async function login(page, decUser, decPass, downloadDir) {
   await debugShot(page, downloadDir, "01-form-login-federado");
 
   // Confirmado en vivo: primero hay que elegir país (opción "Chile") y
-  // recién ahí aparece el input de RUT y el botón "ENTRAR".
+  // recién ahí aparece el input de RUT y el botón "Entrar".
   //
-  // OJO (confirmado por la corrida #6 real, error mío en un fix anterior):
-  // el campo REAL para Chile tiene placeholder exacto "Ingresa tu RUT" —
-  // "Ingresa tu RUT/DNI" (id="taxpayer_id") es un campo DISTINTO, oculto,
-  // de otro paso/país del mismo formulario multi-país. Un selector por
-  // "Ingresa tu RUT/DNI" matchea ese decoy oculto y nunca se vuelve
-  // visible (falló 3/3 intentos). La captura debug-02-pais-seleccionado.png
-  // de esa corrida confirma que, apenas se elige Chile, el campo visible
-  // real ya dice "Ingresa tu RUT" (sin "/DNI").
+  // Confirmado inspeccionando el DOM real con javascript_tool (no
+  // adivinado, no vía capturas): hay UN SOLO campo de RUT en todo el
+  // formulario, `<input id="taxpayer_id" name="taxpayer_id">` — su
+  // PLACEHOLDER cambia dinámicamente según el país elegido ("Ingresa tu
+  // RUT/DNI" antes de elegir país u con otro país, "Ingresa tu RUT" recién
+  // al elegir Chile). Selectores anteriores basados en el placeholder
+  // (con o sin "/DNI") fallaban por esto — un selector por texto que
+  // cambia es inherentemente frágil. Usar el `id`, que es estable.
   await paisSelect.selectOption({ label: "Chile" });
   await debugShot(page, downloadDir, "02-pais-seleccionado");
 
-  const rutInput = page.getByPlaceholder("Ingresa tu RUT", { exact: true });
+  const rutInput = page.locator("#taxpayer_id");
   try {
     await rutInput.waitFor({ state: "visible", timeout: 8000 });
   } catch {
-    // Sí confirmado como flaky en la corrida #5 (2 de 3 intentos): a veces
-    // el widget no reacciona al primer selectOption. Reintentar alcanzó
-    // ahí — se deja como red de seguridad, aunque la causa raíz de la
-    // corrida #6 era el selector equivocado, no esto.
+    // Visto como flaky en una corrida real (2 de 3 intentos): a veces el
+    // widget no reacciona al primer selectOption. Reintentar alcanzó ahí
+    // — se deja como red de seguridad.
     console.log("Campo de RUT seguía oculto tras seleccionar país, reintentando selectOption…");
     await paisSelect.selectOption({ label: "Chile" });
     await rutInput.waitFor({ state: "visible", timeout: 15000 });
   }
   await rutInput.fill(decUser);
-  console.log("RUT completado, clic ENTRAR…");
+  console.log("RUT completado, clic Entrar…");
   await clickSubmit(page);
   await debugShot(page, downloadDir, "03-tras-rut-entrar");
 
@@ -131,10 +141,10 @@ async function login(page, decUser, decPass, downloadDir) {
   }
   await claveInput.fill(decPass);
   // OJO (confirmado en vivo por el usuario mirando la corrida real): el
-  // botón de este paso NO se llama "ENTRAR" como el del RUT — es
-  // "CONTINUAR". clickSubmit() prueba los dos nombres en vez de asumir uno
+  // botón de este paso NO se llama "Entrar" como el del RUT — es
+  // "Continuar". clickSubmit() prueba los dos nombres en vez de asumir uno
   // solo, para no repetir este mismo error si vuelve a cambiar el texto.
-  console.log("Clave completada, clic CONTINUAR…");
+  console.log("Clave completada, clic Continuar…");
   await debugShot(page, downloadDir, "04-tras-clave");
   await clickSubmit(page);
 
