@@ -27,78 +27,11 @@ resolverlo y simplemente no encontró ninguno esa vez).
 from __future__ import annotations
 
 import datetime as dt
-import re
 from pathlib import Path
-from random import randint
 
 from scrapling.fetchers import StealthyFetcher
 
 BASE_URL = "https://www.controltienda.com/proveedor_server"
-
-# Mismo patrón que usa Scrapling internamente para ubicar el iframe del
-# challenge de Cloudflare (`__CF_PATTERN__` en
-# scrapling/engines/_browsers/_stealth.py).
-_CF_IFRAME_PATTERN = re.compile(r"^https?://challenges\.cloudflare\.com/cdn-cgi/challenge-platform/.*")
-
-
-def _click_turnstile_si_aparece(page, captura, *, intentos_espera: int = 20) -> bool:
-    """Busca el iframe de Cloudflare Turnstile y clickea su checkbox si
-    aparece. Devuelve True si encontró y clickeó uno, False si no apareció
-    ninguno en el tiempo de espera (~10s con `intentos_espera=20`).
-
-    Confirmado leyendo el código fuente de Scrapling instalado
-    (`scrapling/engines/_browsers/_stealth.py`, `_cloudflare_solver` /
-    `StealthySession.fetch`): `solve_cloudflare=True` solo corre ese
-    solver UNA VEZ, inmediatamente después de la navegación inicial a
-    `login.php` y ANTES de ejecutar nuestro `page_action` — nunca se
-    vuelve a invocar durante `page_action`. Este portal en particular no
-    muestra ningún challenge en la carga inicial (confirmado en
-    `01_login_page` de los pantallazos: formulario limpio), sino que
-    dispara un Turnstile recién al hacer submit del login (visto en
-    `02_despues_click_login`: banner "Verificación de seguridad fallida"
-    seguido del checkbox "Verify you are human" en
-    `03_timeout_esperando_index` — momento en el que `solve_cloudflare`
-    ya terminó de correr y no vuelve a intervenir. Por eso hace falta
-    resolverlo a mano acá, replicando la misma técnica de click
-    coordinado sobre el iframe (bounding box + click con offset
-    aleatorio) que usa Scrapling para el challenge inicial."""
-    iframe = None
-    for _ in range(intentos_espera):
-        iframe = page.frame(url=_CF_IFRAME_PATTERN)
-        if iframe is not None:
-            break
-        page.wait_for_timeout(500)
-    if iframe is None:
-        return False
-
-    frame_element = iframe.frame_element()
-    box = frame_element.bounding_box()
-    if not box:
-        return False
-
-    x = box["x"] + randint(26, 28)
-    y = box["y"] + randint(25, 27)
-    page.mouse.click(x, y, delay=randint(100, 200), button="left")
-    captura(page, "turnstile_clickeado")
-
-    # El checkbox pasa a "marcado" casi al instante del click, pero el
-    # intercambio con Cloudflare que llena el input oculto
-    # cf-turnstile-response (el que el formulario necesita al reenviar)
-    # tarda unos segundos más — confirmado en pantallazos de una corrida
-    # real (run 33112307497): reenviar el login apenas se ve el check
-    # marcado, sin esperar el token, repite el mismo fallo porque el
-    # formulario todavía viaja sin token válido. `cf-turnstile-response`
-    # es el nombre de campo estándar que inyecta el widget de Turnstile.
-    token_input = page.locator('input[name="cf-turnstile-response"]')
-    for _ in range(16):
-        try:
-            if token_input.count() > 0 and (token_input.first.input_value() or "").strip():
-                break
-        except Exception:
-            pass
-        page.wait_for_timeout(500)
-    captura(page, "turnstile_token_listo")
-    return True
 
 
 def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path) -> Path:
@@ -168,29 +101,33 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
 
     # El submit del login dispara acá (no en la carga inicial de
     # login.php) un Turnstile embebido que `solve_cloudflare=True` no
-    # cubre — ver el docstring de `_click_turnstile_si_aparece` para el
-    # detalle. Confirmado con pantallazos de una corrida real: cuando la
-    # verificación falla, el portal recarga `login.php?error=captcha` —
-    # una página "fresca" que resetea el formulario — y muestra el
-    # checkbox de Turnstile recién ahí. Resolverlo no alcanza: hay que
-    # volver a llenar RUT/clave (se perdieron con el reload) y reintentar
-    # el submit, por eso el reintento cubre el ciclo completo, no solo el
-    # click al checkbox.
-    max_intentos_turnstile = 3
-    for intento in range(1, max_intentos_turnstile + 1):
+    # cubre. Probamos primero clickear el checkbox a mano cuando escala a
+    # modo interactivo, pero en una corrida real (33113513039) el
+    # checkbox quedaba bien marcado y aun así Cloudflare lo rechazaba
+    # server-side ("Verification failed") las veces que se probó —
+    # confirmado con el usuario, que a mano SÍ pudo loguearse volviendo a
+    # cargar `login.php` limpio (sin
+    # `?error=captcha`) en vez de forcejear el checkbox ya escalado en la
+    # página de error. Por eso el reintento recarga `login.php` desde
+    # cero cada vez, apostando a que el challenge vuelva a evaluarse en
+    # modo invisible (el que sí pasó solo, sin checkbox, en la corrida
+    # exitosa 33080161187) en lugar de seguir en el modo interactivo ya
+    # marcado como sospechoso.
+    max_intentos_login = 3
+    for intento in range(1, max_intentos_login + 1):
         try:
             page.wait_for_url("**/index.php**", timeout=15000)
             break
         except Exception:
-            if intento == max_intentos_turnstile:
+            if intento == max_intentos_login:
                 captura(page, "03_timeout_esperando_index")
                 raise
-            captura(page, f"03_turnstile_intento_{intento}")
-            if _click_turnstile_si_aparece(page, captura):
-                page.fill("#usuario", frax_user)
-                page.fill("#clave", frax_pass)
-                page.click("button.btn-login")
-                captura(page, f"03b_reintento_login_{intento}")
+            captura(page, f"03_reintento_{intento}")
+            page.goto(f"{BASE_URL}/login.php")
+            page.fill("#usuario", frax_user)
+            page.fill("#clave", frax_pass)
+            page.click("button.btn-login")
+            captura(page, f"03b_reintento_login_{intento}")
     captura(page, "03_index_ok")
 
     # Aviso de "cuenta con pago pendiente" — no está confirmado que
