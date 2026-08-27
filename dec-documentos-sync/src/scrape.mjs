@@ -58,41 +58,80 @@ async function login(page, decUser, decPass, downloadDir) {
   await page.getByText("Identidad Digital", { exact: true }).click();
   await page.locator("#id-login").click();
 
-  await page.waitForURL(/identidaddigital\.acepta\.com|servicios\.dec\.cl|5\.dec\.cl/, { timeout: 20000 });
+  // OJO (confirmado por la corrida #2 real): esperar solo /5\.dec\.cl/ acá
+  // es ambiguo — esa misma regex matchea TANTO la pantalla de login
+  // (5.dec.cl/auth) COMO el portal ya autenticado (5.dec.cl/portal), así
+  // que no sirve para confirmar nada. Hay que esperar específicamente a
+  // salir de 5.dec.cl hacia el proveedor externo.
+  await page.waitForURL(/identidaddigital\.acepta\.com|servicios\.dec\.cl/, { timeout: 20000 });
+  console.log(`Tras "Ingresar": ${page.url()}`);
   await debugShot(page, downloadDir, "01-tras-ingresar");
 
-  if (/identidaddigital\.acepta\.com/.test(page.url())) {
-    // Confirmado en vivo: primero hay que elegir país (<select>, opción
-    // "Chile") y recién ahí aparece el input de RUT (placeholder real
-    // "Ingresa tu RUT") y el botón "ENTRAR".
-    await page.locator("select").first().selectOption({ label: "Chile" });
-    await page.getByPlaceholder("Ingresa tu RUT").fill(decUser);
-    await page.getByRole("button", { name: "ENTRAR" }).click();
-    await page.waitForTimeout(1500);
-    await debugShot(page, downloadDir, "02-tras-rut");
-
-    // NO CONFIRMADO todavía: la sesión de prueba ya estaba autenticada en
-    // Acepta (cookie cacheada del usuario) así que nunca llegamos a ver la
-    // pantalla real que pide la clave — se asume un <input type="password">
-    // estándar en la misma pantalla (o la siguiente, Playwright espera
-    // igual). Si esto falla en la primera corrida real, revisar
-    // debug-02-tras-rut.png/.html y ajustar el selector acá.
-    const claveInput = page.locator('input[type="password"]').first();
-    await claveInput.waitFor({ timeout: 10000 });
-    await claveInput.fill(decPass);
-    await page.getByRole("button", { name: "ENTRAR" }).click();
-    await debugShot(page, downloadDir, "03-tras-clave");
-
-    // El reCAPTCHA visible en la pantalla de Acepta es la mayor incógnita de
-    // este login (no se confirmó si es v2 checkbox o v3 invisible) — si
-    // bloquea a Playwright headless corriendo desde IP de datacenter de
-    // GitHub Actions, revisar este screenshot primero (mismo tipo de
-    // bloqueo que tuvo presentismo-sync con Cloudflare Turnstile).
+  // Si cayó en servicios.dec.cl (paso intermedio del OAuth) en vez de
+  // directo en Acepta, esperar el segundo salto.
+  if (!/identidaddigital\.acepta\.com/.test(page.url())) {
+    await page.waitForURL(/identidaddigital\.acepta\.com/, { timeout: 20000 });
+    console.log(`Tras servicios.dec.cl: ${page.url()}`);
+    await debugShot(page, downloadDir, "01b-tras-servicios-dec");
   }
+
+  // Confirmado en vivo: primero hay que elegir país (<select>, opción
+  // "Chile") y recién ahí aparece el input de RUT (placeholder real
+  // "Ingresa tu RUT") y el botón "ENTRAR".
+  await page.locator("select").first().selectOption({ label: "Chile" });
+  await debugShot(page, downloadDir, "02-pais-seleccionado");
+
+  const rutInput = page.getByPlaceholder("Ingresa tu RUT");
+  await rutInput.waitFor({ timeout: 10000 });
+  await rutInput.fill(decUser);
+  console.log("RUT completado en Acepta, clic ENTRAR…");
+  await page.getByRole("button", { name: "ENTRAR" }).click();
+  await page.waitForTimeout(1500);
+  await debugShot(page, downloadDir, "03-tras-rut-entrar");
+
+  // Confirmar que seguimos en Acepta antes de tocar el campo de clave — si
+  // no, el error queda claro acá en vez de arrastrarse como un timeout
+  // confuso más adelante en Reportería (lo que pasó en la corrida #2: el
+  // login "no tiró error" pero en realidad nunca completó, y recién se
+  // notó cuando #filtro-reporte no apareció).
+  if (!/identidaddigital\.acepta\.com/.test(page.url())) {
+    throw new Error(
+      `Tras completar el RUT, la página salió de Acepta antes de pedir la clave (quedó en ${page.url()}) — revisar debug-03-tras-rut-entrar.png de esta corrida.`,
+    );
+  }
+
+  // NO CONFIRMADO todavía contra una corrida 100% exitosa: se asume un
+  // <input type="password"> estándar en la misma pantalla. Si esto falla,
+  // revisar debug-03-tras-rut-entrar.png/04-tras-clave.png de esa corrida.
+  const claveInput = page.locator('input[type="password"]').first();
+  await claveInput.waitFor({ timeout: 10000 });
+  await claveInput.fill(decPass);
+  console.log("Clave completada en Acepta, clic ENTRAR…");
+  await debugShot(page, downloadDir, "04-tras-clave");
+  await page.getByRole("button", { name: "ENTRAR" }).click();
+
+  // El reCAPTCHA visible en la pantalla de Acepta es la mayor incógnita de
+  // este login (no se confirmó si es v2 checkbox o v3 invisible) — si
+  // bloquea a Playwright headless corriendo desde IP de datacenter de
+  // GitHub Actions, revisar debug-04-tras-clave.png / 05-post-login.png
+  // primero (mismo tipo de bloqueo que tuvo presentismo-sync con
+  // Cloudflare Turnstile).
 
   await page.waitForURL(/5\.dec\.cl/, { timeout: 30000 });
   await page.waitForLoadState("networkidle").catch(() => {});
-  await debugShot(page, downloadDir, "04-post-login");
+  console.log(`URL final tras login: ${page.url()}`);
+  await debugShot(page, downloadDir, "05-post-login");
+
+  // Como se explicó arriba, /5\.dec\.cl/ matchea tanto el portal
+  // autenticado como su propia pantalla de login — confirmar que
+  // REALMENTE quedamos adentro buscando un elemento que solo existe
+  // autenticado ("Mi Portal" en el menú superior).
+  const dentro = await page.getByRole("link", { name: "Mi Portal" }).count();
+  if (dentro === 0) {
+    throw new Error(
+      `El login no terminó adentro del portal — la URL final (${page.url()}) coincide con /5\\.dec\\.cl/ pero es la pantalla de login, no el portal (revisar debug-05-post-login.png).`,
+    );
+  }
 }
 
 async function triggerReporte(page, downloadDir, waitMultiplier) {
