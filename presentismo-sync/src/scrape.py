@@ -27,12 +27,18 @@ resolverlo y simplemente no encontró ninguno esa vez).
 from __future__ import annotations
 
 import datetime as dt
+import re
 from pathlib import Path
 from random import randint
 
 from scrapling.fetchers import StealthyFetcher
 
 BASE_URL = "https://www.controltienda.com/proveedor_server"
+
+# Mismo patrón que usa Scrapling internamente para ubicar el iframe del
+# challenge de Cloudflare (`__CF_PATTERN__` en
+# scrapling/engines/_browsers/_stealth.py).
+_CF_IFRAME_PATTERN = re.compile(r"^https?://challenges\.cloudflare\.com/cdn-cgi/challenge-platform/.*")
 
 
 def _tipear(page, selector: str, texto: str) -> None:
@@ -41,6 +47,46 @@ def _tipear(page, selector: str, texto: str) -> None:
     eventos de teclado reales) — a pedido del usuario, buscando que el
     login se vea más humano ante el chequeo de riesgo de Cloudflare."""
     page.locator(selector).press_sequentially(texto, delay=randint(60, 140))
+
+
+def _click_turnstile_si_aparece(page, captura, *, intentos_espera: int = 20) -> bool:
+    """Busca el iframe de Cloudflare Turnstile y clickea su checkbox si
+    aparece. Devuelve True si encontró y clickeó uno. Sin esto el
+    checkbox se queda sin marcar para siempre (confirmado en los
+    pantallazos de varias corridas: "Verify you are human" nunca
+    tildado) y el submit no tiene forma de pasar."""
+    iframe = None
+    for _ in range(intentos_espera):
+        iframe = page.frame(url=_CF_IFRAME_PATTERN)
+        if iframe is not None:
+            break
+        page.wait_for_timeout(500)
+    if iframe is None:
+        return False
+
+    box = iframe.frame_element().bounding_box()
+    if not box:
+        return False
+
+    x = box["x"] + randint(26, 28)
+    y = box["y"] + randint(25, 27)
+    page.mouse.click(x, y, delay=randint(100, 200), button="left")
+    captura(page, "turnstile_clickeado")
+
+    # Esperar el input oculto cf-turnstile-response (el token que el
+    # formulario necesita al reenviar) en vez de un wait fijo corto —
+    # confirmado en el run 33112307497 que reenviar apenas se ve el
+    # check marcado, sin el token listo, repite el mismo fallo.
+    token_input = page.locator('input[name="cf-turnstile-response"]')
+    for _ in range(16):
+        try:
+            if token_input.count() > 0 and (token_input.first.input_value() or "").strip():
+                break
+        except Exception:
+            pass
+        page.wait_for_timeout(500)
+    captura(page, "turnstile_token_listo")
+    return True
 
 
 def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path) -> Path:
@@ -116,19 +162,15 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
 
     # El submit del login dispara acá (no en la carga inicial de
     # login.php) un Turnstile embebido que `solve_cloudflare=True` no
-    # cubre. Ya probamos clickear el checkbox a mano y también recargar
-    # login.php limpio antes de reintentar — ninguna de las dos sirvió de
-    # forma consistente (runs 33113513039 y 33116630944). A pedido del
-    # usuario: sin navegar a ningún lado, sobre la misma
-    # login.php?error=captcha, volver a llenar RUT/clave y reintentar el
-    # submit una vez — confirmado que el fill sí funciona bien
-    # (pantallazo 01b_campos_llenos con "Formato correcto" en verde), así
-    # que si esto tampoco alcanza el problema es Cloudflare rechazando la
-    # sesión, no el llenado del formulario.
+    # cubre. Reintento combinado: clickear el checkbox si aparece (sin
+    # esto se queda sin marcar para siempre, confirmado en pantallazos)
+    # Y volver a llenar RUT/clave (se pierden con el reload que dispara
+    # el propio submit fallido) antes de reenviar.
     try:
         page.wait_for_url("**/index.php**", timeout=15000)
     except Exception:
         captura(page, "03_error_primer_intento")
+        _click_turnstile_si_aparece(page, captura)
         _tipear(page, "#usuario", frax_user)
         _tipear(page, "#clave", frax_pass)
         captura(page, "03b_campos_rellenados")

@@ -90,7 +90,11 @@ def main() -> None:
                 file_path=file_path, supabase_url=supabase_url, supabase_service_key=supabase_service_key
             )
 
-        result = with_retries(intentar)
+        # TODO: volver a max_intentos=3 (default) una vez que encontremos
+        # una estrategia que pase el Turnstile de forma confiable — en
+        # 1 mientras iteramos a mano para no esperar los 60s+120s de
+        # backoff en cada prueba.
+        result = with_retries(intentar, max_intentos=1)
         print(
             f"Listo: {result['cargadas']}/{result['total']} marcaciones cargadas "
             f"({result['sin_sala']} sin sala reconocida)."
