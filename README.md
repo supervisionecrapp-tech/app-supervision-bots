@@ -27,6 +27,11 @@ admin-panel manual.
   propia de SMU, distinta de la que usa asistencia-sync por API. Reemplaza
   la carga manual de Excel en panel-cliente.html (sección "Presentismo SMU
   — Reporte de Accesos").
+- **[dec-documentos-sync](./dec-documentos-sync)** — Documentos Pendientes
+  de Firma desde el portal DEC (5.dec.cl, cuenta SOLUC_ESPECIALIZADAS_OUT_SA)
+  — reporte "Estado de Firma de Docs" de Reportería. Reemplaza la carga
+  manual de Excel en panel-cliente.html (sección "Documentos Pendientes de
+  Firma").
 
 Todos loguean cada corrida (éxito o error) en la tabla `bot_runs` de
 Supabase — el admin-panel.html tiene un calendario que lee de ahí para
@@ -45,6 +50,10 @@ En `Settings → Secrets and variables → Actions` de este repo:
   Externos" de SMU (externos.geovictoria.com), cuenta propia de SMU — no
   confundir con `GEOVICTORIA_KEY`/`GEOVICTORIA_SECRET` de asistencia-sync,
   que es otra cuenta GV y usa API en vez de login web (smu-presentismo-sync).
+- `DEC_IDD_USER` / `DEC_IDD_PASS` — RUT y clave de **Identidad Digital**
+  (identidaddigital.acepta.com), NO el login directo de 5.dec.cl — la cuenta
+  SOLUC_ESPECIALIZADAS_OUT_SA solo entra por ahí (tab "Identidad Digital" en
+  el portal, ver dec-documentos-sync/src/scrape.mjs).
 - `SUPABASE_SERVICE_ROLE_KEY` — desde el dashboard de Supabase
   (Project Settings → API → `service_role`/`sb_secret_...`). Da acceso
   total, tratarla como una contraseña. Compartida por todos los bots.
@@ -140,6 +149,62 @@ pero la primera corrida real del bot es la que confirma que el endpoint
 devuelve el .xlsx directo y no un flujo de dos pasos como teamcore-sync
 (pedido + polling) — si falla con "no devolvió un .xlsx", revisar de
 nuevo el flujo real del portal.
+
+## dec-documentos-sync
+
+Corre vía [`.github/workflows/dec-documentos-sync.yml`](./.github/workflows/dec-documentos-sync.yml):
+diario 07:00 Chile, `workflow_dispatch` manual soportado sin inputs.
+
+El portal DEC (5.dec.cl, firma electrónica de documentos — Sovos/Autentia)
+solo deja entrar a la cuenta `SOLUC_ESPECIALIZADAS_OUT_SA` por la tab
+**"Identidad Digital"** (login normal RUT+clave por `5.dec.cl` no sirve para
+esta cuenta, confirmado probando en vivo) — eso redirige a un login federado
+OAuth2 (`servicios.dec.cl` → `identidaddigital.acepta.com`, proveedor externo
+Acepta): seleccionar país "Chile", luego RUT + clave (`DEC_IDD_USER`/
+`DEC_IDD_PASS`, credenciales de **Identidad Digital**, no de un login directo
+del portal). Por eso usa Playwright completo (`src/scrape.mjs`), no
+fetch+cookie-jar — hay un reCAPTCHA visible en esa pantalla cuya interacción
+con Playwright headless en IP de datacenter de GitHub Actions **no está
+confirmada todavía** (mismo tipo de riesgo que tuvo `presentismo-sync` con
+Cloudflare Turnstile — si bloquea, mismo fallback: Python+Scrapling/Camoufox
+en vez de Playwright puro).
+
+Reportería (`5.dec.cl/reporteria`) es un flujo de 3 pasos, todos confirmados
+en vivo contra el DOM/red real: `select#filtro-reporte="Estado de Firma de
+Docs"` + `input#date_from="01/01/<año actual>"` + `select#filtro-estados
+="Pendiente"` → botón `#btnBuscar` (`POST getTableWithResultsFromTransactionerCall`,
+pinta resultados inline) → botón "Exportar" (`POST exportReportesDec`,
+dispara un job asíncrono y devuelve un modal "Se generó el reporte N°
+`<id>`") → polling de `#tabla_grilla_reportes` en
+`/reporteria/listado_reportes` hasta que la columna `ESTADO` de esa fila
+pase de `AVANCE X%` a `OK` (tomó bajo 2 min con 2,727 filas en la corrida de
+prueba) → descarga vía el link de esa fila
+(`GET /reports/download?key=<hash>_<id>.zip`, con `page.waitForEvent("download")`
+— no es fetch-eable por CORS). El zip trae el `.xlsx` real adentro
+(`adm-zip` lo descomprime, a diferencia de los demás bots que bajan el Excel
+directo).
+
+El reporte solo trae `dni_firmante`/`descripcion`/`estado_documento`/etc. —
+sin cargo, sala ni supervisor. `src/upload.mjs` los resuelve cruzando contra
+la dotación propia, en dos niveles: primero `cbtrs_asignaciones` (Cobertura,
+asignación vigente hoy → cargo + sala → supervisor/zona), y si el RUT no
+está ahí (cargos excluidos de Cobertura, ej. AUDITOR), cae a
+`turnos_colaboradores` (roster completo desde GeoVictoria, sin exigir sala
+propia — supervisor se resuelve vía `grupo_gv → grupos_gv.nombre →
+salas.grupo_gv_id → salas.supervisor_id`, mismo join que ya usa la RLS
+policy de esa tabla). Si un RUT no aparece en ninguna de las dos, la fila se
+descarta (se loguea el conteo en la consola de la corrida) — no hay
+nombre/cargo confiables para las columnas `NOT NULL` de
+`documentos_pendientes`. Mismo reemplazo total (`delete` + insert en batches
+de 1000) que ya hacía la carga manual de panel-cliente.html, que queda
+intacta como fallback si el bot falla.
+
+**Sin verificar todavía**: el selector exacto del campo de clave en
+`identidaddigital.acepta.com` — la sesión donde se relevó el resto del flujo
+ya estaba autenticada en Acepta (cookie cacheada del usuario logueado en su
+Chrome), así que nunca se llegó a ver esa pantalla en vivo. `scrape.mjs`
+asume un `<input type="password">` genérico; si la primera corrida real
+falla ahí, revisar `debug-02-tras-rut.png` de esa corrida y ajustar.
 
 ## venta-perdida-sync
 
@@ -305,6 +370,8 @@ npm install
 npx playwright install chromium   # no aplica a teamcore-sync, venta-perdida-sync ni notificaciones-sync, no usan Playwright
 # red-sync:
 DATAWALT_USER=... DATAWALT_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
+# dec-documentos-sync:
+DEC_IDD_USER=... DEC_IDD_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
 # teamcore-sync:
 TEAMCORE_USER=... TEAMCORE_PASS=... SUPABASE_SERVICE_ROLE_KEY=... npm run sync
 # notificaciones-sync (tipo ∈ presentismo-semanal | teamcore-semanal | red-semanal | venta-perdida-semanal | documentos-pendientes | intradia-combinado):

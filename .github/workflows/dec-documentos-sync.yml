@@ -1,0 +1,49 @@
+name: DEC Documentos Sync
+
+on:
+  schedule:
+    # Diario 07:00 America/Santiago = 11:00 UTC (Chile continental no
+    # cambia de huso todo el año) — antes de que notificaciones-documentos.yml
+    # corra lunes/miércoles/viernes 12:00 Chile, para que el recordatorio de
+    # documentos pendientes lea datos frescos del día.
+    - cron: "0 11 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dec-documentos-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22+ trae WebSocket nativo — @supabase/supabase-js lo necesita
+          # para inicializar el cliente (aunque no usemos Realtime) y en
+          # Node 20 tira error al hacer createClient().
+          node-version: 22
+
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+
+      - name: Sync DEC Documentos
+        env:
+          DEC_IDD_USER: ${{ secrets.DEC_IDD_USER }}
+          DEC_IDD_PASS: ${{ secrets.DEC_IDD_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync
+
+      # Se sube siempre (success() || failure()) — las capturas de
+      # depuración son justamente para diagnosticar cuando algo falla, en
+      # especial el login por Identidad Digital (Acepta), la parte menos
+      # verificada del flujo (ver comentarios en src/scrape.mjs).
+      - name: Subir capturas de debug
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: |
+            dec-documentos-sync/downloads/debug-*.png
+          if-no-files-found: ignore
