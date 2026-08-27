@@ -57,7 +57,7 @@ export async function uploadDecReporte({ xlsxPath, supabaseUrl, supabaseServiceK
       rut: rutRaw,
       nombre_colaborador: persona.nombre,
       cargo: persona.cargo,
-      is_part_time: persona.cargo.toUpperCase().includes("PART TIME"),
+      is_part_time: esPartTime(persona.cargo),
       supervisor_nombre: persona.supervisorNombre,
       zona: persona.zona,
       sap_raw: persona.sap != null ? String(persona.sap) : null,
@@ -103,6 +103,26 @@ export async function uploadDecReporte({ xlsxPath, supabaseUrl, supabaseServiceK
 
 function normalizeRut(raw) {
   return (raw ?? "").toString().replace(/[.-]/g, "").toUpperCase();
+}
+
+// Confirmado en vivo con el usuario tras ver los cargos reales cargados: el
+// texto "PART TIME" solo cubre el vocabulario de cbtrs_asignaciones
+// (Cobertura) — turnos_colaboradores (roster GV, usado en el fallback)
+// abrevia el mismo concepto como códigos de turno "W1"/"W2"/"W3" (ej.
+// "VOLANTE W1", "CUBRE VACACIONES W1", "SUPERVISOR PART TIME W2") y como
+// "MDJ"/"MJ" para media jornada (ej. "MDJ" solo, "CUBRE LICENCIA MJ") — el
+// mismo concepto que "MEDIA JORNADA" en cbtrs_asignaciones, que tampoco
+// contiene el texto "PART TIME" pese a ser part-time. Se detectan como
+// tokens completos (con \b) para no confundir con substrings de otras
+// palabras.
+function esPartTime(cargo) {
+  const c = (cargo ?? "").toUpperCase();
+  return (
+    c.includes("PART TIME") ||
+    c.includes("MEDIA JORNADA") ||
+    /\bW\d\b/.test(c) ||
+    /\bM\.?D?J\b/.test(c)
+  );
 }
 
 function cleanText(v) {
