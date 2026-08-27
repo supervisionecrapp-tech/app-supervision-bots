@@ -44,9 +44,19 @@ async function login(page, decUser, decPass, downloadDir) {
   // entra por la pestaña "Usar Pin" (RUT+clave directo en 5.dec.cl) — hay
   // que usar "Identidad Digital", que redirige a un login federado OAuth2
   // (servicios.dec.cl -> identidaddigital.acepta.com, proveedor externo
-  // Acepta). El botón "Ingresar" queda habilitado apenas se elige la tab.
+  // Acepta).
+  //
+  // OJO (confirmado por la corrida #1 real, que falló acá): la página tiene
+  // DOS botones "Ingresar" al mismo tiempo, uno por cada tab del login
+  // ("Usar Pin" y "Identidad Digital" se renderizan ambos en el DOM, solo
+  // se oculta el contenido, no el botón) — un selector por texto/accessible
+  // name matchea los dos y Playwright lo rechaza (strict mode violation).
+  // Hay que apuntar al id real de la tab de Identidad Digital:
+  // #log-button = tab "Usar Pin" (queda `disabled` sin RUT+clave cargados).
+  // #id-login = tab "Identidad Digital" (el que sirve — su propio onclick
+  // ya revela el redirect real: dmg.trust.sovos.com/oauthidd/.../dec_prod_cl).
   await page.getByText("Identidad Digital", { exact: true }).click();
-  await page.getByRole("button", { name: "Ingresar" }).click();
+  await page.locator("#id-login").click();
 
   await page.waitForURL(/identidaddigital\.acepta\.com|servicios\.dec\.cl|5\.dec\.cl/, { timeout: 20000 });
   await debugShot(page, downloadDir, "01-tras-ingresar");
