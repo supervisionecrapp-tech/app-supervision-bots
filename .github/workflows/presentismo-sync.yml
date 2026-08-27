@@ -31,9 +31,15 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Instala el navegador (Camoufox) que usa StealthyFetcher — mismo
-      # rol que `playwright install` en los otros bots de este repo.
+      # Instala el navegador que usa StealthyFetcher — mismo rol que
+      # `playwright install` en los otros bots de este repo.
       - run: scrapling install
+
+      # El scrape corre HEADFUL (headless=False) porque Cloudflare detecta
+      # Chrome headless: sin display real no arranca, así que xvfb le da uno
+      # virtual. Viene en la imagen de ubuntu-latest, pero lo instalamos
+      # explícito para no depender de eso.
+      - run: sudo apt-get install -y xvfb
 
       - name: Sync
         env:
@@ -41,7 +47,8 @@ jobs:
           FRAX_PASS: ${{ secrets.FRAX_PASS }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FECHA: ${{ github.event.inputs.fecha }}
-        run: python src/sync.py
+        # xvfb-run -a: display virtual para el browser headful.
+        run: xvfb-run -a python src/sync.py
 
       # Pantallazos de cada paso del flujo (login, index, reportes, export),
       # más uno extra si el flujo tira excepción — para diagnosticar en qué

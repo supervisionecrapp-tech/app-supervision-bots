@@ -22,9 +22,9 @@ Diseño del login (reescrito tras diagnosticar el run 33119160851):
    ANTES de clickear "Entrar". El widget es
    `data-appearance="interaction-only"` y el <form> no tiene guardia JS:
    submitear sin token = `login.php?error=captcha` garantizado.
-4. Si no hay token, se intenta el checkbox interactivo una vez; si
-   tampoco, se aborta. Reenviar sobre la página ya rechazada nunca
-   funcionó (el Turnstile de esa página queda en "Verification failed").
+4. Si no hay token en 60s, se aborta: no clickeamos el checkbox
+   nosotros (el evento sintético se detecta, ver el comentario en
+   `_interactuar_paso`) ni reenviamos sobre la página ya rechazada.
    El reintento real es un browser nuevo, vía `with_retries()` en
    sync.py, con espera EXPONENCIAL: confirmado a mano por el usuario que
    golpear el login seguido desde la misma IP hace que el portal escale
@@ -38,18 +38,12 @@ Selectores DOM confirmados contra el portal real en la versión anterior
 from __future__ import annotations
 
 import datetime as dt
-import re
 from pathlib import Path
 from random import randint
 
 from scrapling.fetchers import StealthyFetcher
 
 BASE_URL = "https://www.controltienda.com/proveedor_server"
-
-# Mismo patrón que usa Scrapling internamente para ubicar el iframe del
-# challenge de Cloudflare (`__CF_PATTERN__` en
-# scrapling/engines/_browsers/_stealth.py).
-_CF_IFRAME_PATTERN = re.compile(r"^https?://challenges\.cloudflare\.com/cdn-cgi/challenge-platform/.*")
 
 
 def _tipear(page, selector: str, texto: str) -> None:
@@ -94,30 +88,6 @@ def _esperar_token(page, *, segundos: int = 20) -> bool:
     return False
 
 
-def _click_turnstile_si_aparece(page, captura, *, intentos_espera: int = 20) -> bool:
-    """Fallback: si no llegó token, el widget escaló a modo interactivo
-    (checkbox "Verify you are human" visible). Busca su iframe y lo
-    clickea. Devuelve True si encontró y clickeó uno."""
-    iframe = None
-    for _ in range(intentos_espera):
-        iframe = page.frame(url=_CF_IFRAME_PATTERN)
-        if iframe is not None:
-            break
-        page.wait_for_timeout(500)
-    if iframe is None:
-        return False
-
-    box = iframe.frame_element().bounding_box()
-    if not box:
-        return False
-
-    x = box["x"] + randint(26, 28)
-    y = box["y"] + randint(25, 27)
-    page.mouse.click(x, y, delay=randint(100, 200), button="left")
-    captura(page, "turnstile_clickeado")
-    return True
-
-
 def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path) -> Path:
     """Loguea, filtra el rango de fechas y descarga el Excel de "Detalle de
     marcas". `fecha_ff` es la fecha que queda en el campo "hasta" (se deja
@@ -154,7 +124,19 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
 
     StealthyFetcher.fetch(
         f"{BASE_URL}/login.php",
-        headless=True,
+        # Headful bajo xvfb (ver el workflow) en vez de headless: Cloudflare
+        # detecta Chrome headless con bastante fiabilidad, y es la palanca
+        # más grande que nos queda sin meter plata (proxy residencial).
+        headless=False,
+        # Chrome real instalado en el runner en vez del Chromium embebido:
+        # otra huella distinta.
+        real_chrome=True,
+        # El runner corre en UTC. Un browser que dice ser Chrome de un
+        # usuario chileno pero reporta timezone UTC es un mismatch que
+        # Cloudflare puntúa (la doc de StealthyFetcher menciona explícitamente
+        # los "timezone mismatch attacks" entre lo que parchea).
+        locale="es-CL",
+        timezone_id="America/Santiago",
         solve_cloudflare=True,
         # La doc de StealthyFetcher pide timeout >= 60s cuando el solver
         # de Cloudflare está activo ("The timeout should be at least 60
@@ -195,17 +177,21 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     _tipear(page, "#clave", frax_pass)
 
     # Gate obligatorio: nunca clickear "Entrar" sin token de Turnstile.
-    # Tipear arriba ya consume ~8s, que le dan aire al token asíncrono.
-    if not _esperar_token(page, segundos=20):
-        captura(page, "01c_sin_token_reintento_checkbox")
-        _click_turnstile_si_aparece(page, captura)
-        if not _esperar_token(page, segundos=30):
-            captura(page, "02_sin_token_turnstile")
-            raise RuntimeError(
-                "Turnstile no entregó token: el widget escaló a modo interactivo "
-                "y el checkbox fue rechazado. Hace falta browser/IP nueva "
-                "(lo maneja with_retries en sync.py), no reintentar acá."
-            )
+    # Tipear arriba ya consume ~8s, que se suman a esta espera.
+    #
+    # Ya no clickeamos nosotros el checkbox. Sobre el pantallazo
+    # 232920_02_sin_token_turnstile del run 33126259380 se midió que el
+    # click caía DENTRO del checkbox (offset CSS ~27,26 sobre un checkbox
+    # que va de 11 a 31 en x y de 19 a 39 en y) y aun así Turnstile lo
+    # ignoraba: el evento sintético se está detectando, así que insistir
+    # solo sumaba señal de bot. Si el widget escala a interactivo, el que
+    # tiene que resolverlo es el solver de Scrapling, no nosotros.
+    if not _esperar_token(page, segundos=60):
+        captura(page, "02_sin_token_turnstile")
+        raise RuntimeError(
+            "Turnstile no entregó token en 60s: Cloudflare no está dando el "
+            "pase a este browser/IP. Reintento con browser nuevo vía with_retries."
+        )
 
     captura(page, "01b_campos_llenos_con_token")
     page.click("button.btn-login")
