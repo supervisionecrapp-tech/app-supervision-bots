@@ -152,9 +152,13 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # El submit del login dispara acá (no en la carga inicial de
     # login.php) un Turnstile embebido que `solve_cloudflare=True` no
     # cubre — ver el docstring de `_click_turnstile_si_aparece` para el
-    # detalle. Reintentamos el wait_for_url varias veces, clickeando el
-    # checkbox si aparece entre intento e intento, en vez de un único
-    # timeout largo.
+    # detalle. Confirmado con pantallazos de una corrida real: cuando la
+    # verificación falla, el portal recarga `login.php?error=captcha` —
+    # una página "fresca" que resetea el formulario — y muestra el
+    # checkbox de Turnstile recién ahí. Resolverlo no alcanza: hay que
+    # volver a llenar RUT/clave (se perdieron con el reload) y reintentar
+    # el submit, por eso el reintento cubre el ciclo completo, no solo el
+    # click al checkbox.
     max_intentos_turnstile = 3
     for intento in range(1, max_intentos_turnstile + 1):
         try:
@@ -165,7 +169,11 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
                 captura(page, "03_timeout_esperando_index")
                 raise
             captura(page, f"03_turnstile_intento_{intento}")
-            _click_turnstile_si_aparece(page, captura)
+            if _click_turnstile_si_aparece(page, captura):
+                page.fill("#usuario", frax_user)
+                page.fill("#clave", frax_pass)
+                page.click("button.btn-login")
+                captura(page, f"03b_reintento_login_{intento}")
     captura(page, "03_index_ok")
 
     # Aviso de "cuenta con pago pendiente" — no está confirmado que
