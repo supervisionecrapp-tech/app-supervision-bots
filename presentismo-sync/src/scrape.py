@@ -6,28 +6,30 @@ Puerto a Python/Scrapling del bot Node/Playwright que existió hasta
 Usa `StealthyFetcher` de Scrapling (Chromium/Chrome vía Patchright, NO
 Camoufox pese a lo que decía una versión vieja de este comentario —
 confirmado leyendo el código fuente instalado de scrapling 0.4.15) con
-`solve_cloudflare=True`. Ese solver resuelve el challenge de la carga
-inicial de `login.php`, pero corre UNA sola vez, antes de nuestro
-`page_action` — no cubre el Turnstile embebido que este portal dispara
-recién al hacer submit del login (ver `_click_turnstile_si_aparece`).
+`solve_cloudflare=True`. Ese solver SÍ resuelve el Turnstile embebido de
+`login.php` (log del run 33119160851: `The turnstile version discovered
+is "embedded"` -> `Cloudflare captcha is solved`), pero corre UNA sola
+vez y ANTES de nuestro `page_action`: todo lo que hagamos acá tiene que
+preservar ese estado, no re-navegar.
 
-Diseño "flexible" (a pedido del usuario, tras varias corridas de
-diagnóstico con pantallazos):
-1. Login normal, tipeando RUT/clave con delay (no `page.fill()`, que no
-   dispara eventos de teclado reales).
-2. Si el submit es rechazado, se asume que escaló a modo interactivo:
-   clickear el checkbox de Turnstile si aparece, volver a llenar
-   RUT/clave (se pierden con el reload que dispara el propio submit
-   fallido) y reintentar el submit una vez, dentro de la misma sesión.
-3. Si eso también falla, la función tira una excepción y listo — el
-   reintento real pasa a `with_retries()` en sync.py, con un browser
-   100% nuevo y espera EXPONENCIAL entre intentos (no lineal): confirmado
-   a mano por el usuario que golpear el login muchas veces seguidas
-   desde la misma IP hace que el portal escale el challenge cada vez más
-   rápido, y Scrapling documenta el mismo criterio para su AutoThrottle
-   (`autothrottle_block_backoff`): cualquier respuesta bloqueada DUPLICA
-   el delay en vez de un incremento fijo, para no seguir alimentando esa
-   escalada.
+Diseño del login (reescrito tras diagnosticar el run 33119160851):
+1. NO se re-navega a login.php dentro de `page_action`: `fetch()` ya la
+   cargó y su solver ya resolvió el Turnstile embebido. Recargar ahí
+   descartaba ese token.
+2. Se tipea RUT/clave con delay (no `page.fill()`, que no dispara
+   eventos de teclado reales).
+3. Se espera a que exista el token en `input[name="cf-turnstile-response"]`
+   ANTES de clickear "Entrar". El widget es
+   `data-appearance="interaction-only"` y el <form> no tiene guardia JS:
+   submitear sin token = `login.php?error=captcha` garantizado.
+4. Si no hay token, se intenta el checkbox interactivo una vez; si
+   tampoco, se aborta. Reenviar sobre la página ya rechazada nunca
+   funcionó (el Turnstile de esa página queda en "Verification failed").
+   El reintento real es un browser nuevo, vía `with_retries()` en
+   sync.py, con espera EXPONENCIAL: confirmado a mano por el usuario que
+   golpear el login seguido desde la misma IP hace que el portal escale
+   el challenge cada vez más rápido, y Scrapling documenta el mismo
+   criterio en su AutoThrottle (`autothrottle_block_backoff`).
 
 Selectores DOM confirmados contra el portal real en la versión anterior
 (commit 7e72463 y ba860d8 de este mismo repo) — no adivinados.
@@ -58,12 +60,44 @@ def _tipear(page, selector: str, texto: str) -> None:
     page.locator(selector).press_sequentially(texto, delay=randint(60, 140))
 
 
+_TOKEN_SELECTOR = 'input[name="cf-turnstile-response"]'
+
+
+def _token_turnstile(page) -> str:
+    """Valor actual del input oculto que el widget inyecta dentro del div
+    `.cf-turnstile`. Vacío = todavía no hay token."""
+    try:
+        loc = page.locator(_TOKEN_SELECTOR)
+        if loc.count() == 0:
+            return ""
+        return (loc.first.input_value() or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _esperar_token(page, *, segundos: int = 20) -> bool:
+    """Espera a que Turnstile entregue el token antes de dejar submitear.
+
+    El widget del portal está montado con `data-appearance="interaction-only"`
+    (confirmado leyendo el HTML real de login.php): es INVISIBLE mientras
+    Cloudflare esté conforme y el token llega de forma ASÍNCRONA. El
+    <form id="loginForm"> no tiene ninguna guardia JS, así que si se
+    clickea "Entrar" antes de que el token exista, el POST viaja con
+    `cf-turnstile-response` vacío y el server responde
+    `login.php?error=captcha`. Esa es la causa raíz del run 33119160851:
+    el bot tipeaba y clickeaba ~2s después de cargar la página.
+    """
+    for _ in range(segundos * 2):
+        if _token_turnstile(page):
+            return True
+        page.wait_for_timeout(500)
+    return False
+
+
 def _click_turnstile_si_aparece(page, captura, *, intentos_espera: int = 20) -> bool:
-    """Busca el iframe de Cloudflare Turnstile y clickea su checkbox si
-    aparece. Devuelve True si encontró y clickeó uno. Sin esto el
-    checkbox se queda sin marcar para siempre (confirmado en los
-    pantallazos de varias corridas: "Verify you are human" nunca
-    tildado) y el submit no tiene forma de pasar."""
+    """Fallback: si no llegó token, el widget escaló a modo interactivo
+    (checkbox "Verify you are human" visible). Busca su iframe y lo
+    clickea. Devuelve True si encontró y clickeó uno."""
     iframe = None
     for _ in range(intentos_espera):
         iframe = page.frame(url=_CF_IFRAME_PATTERN)
@@ -81,20 +115,6 @@ def _click_turnstile_si_aparece(page, captura, *, intentos_espera: int = 20) -> 
     y = box["y"] + randint(25, 27)
     page.mouse.click(x, y, delay=randint(100, 200), button="left")
     captura(page, "turnstile_clickeado")
-
-    # Esperar el input oculto cf-turnstile-response (el token que el
-    # formulario necesita al reenviar) en vez de un wait fijo corto —
-    # confirmado en el run 33112307497 que reenviar apenas se ve el
-    # check marcado, sin el token listo, repite el mismo fallo.
-    token_input = page.locator('input[name="cf-turnstile-response"]')
-    for _ in range(16):
-        try:
-            if token_input.count() > 0 and (token_input.first.input_value() or "").strip():
-                break
-        except Exception:
-            pass
-        page.wait_for_timeout(500)
-    captura(page, "turnstile_token_listo")
     return True
 
 
@@ -136,6 +156,11 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
         f"{BASE_URL}/login.php",
         headless=True,
         solve_cloudflare=True,
+        # La doc de StealthyFetcher pide timeout >= 60s cuando el solver
+        # de Cloudflare está activo ("The timeout should be at least 60
+        # seconds when using the Cloudflare solver"). El default de 30s
+        # dejaba al solver sin margen.
+        timeout=90000,
         # Los waits explícitos de arriba (wait_for_url/wait_for_selector/
         # wait_for_timeout) ya cubren cada paso — esperar además a
         # "networkidle" en cada navegación solo suma tiempo muerto
@@ -150,7 +175,15 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
 
 
 def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pass: str, fecha_fi: dt.date, fecha_ff: dt.date, download_dir: Path) -> None:
-    page.goto(f"{BASE_URL}/login.php")
+    # NO volver a navegar a login.php. `StealthyFetcher.fetch()` ya cargó
+    # esa misma URL y su solver corrió ANTES de este page_action (la doc
+    # de Scrapling: page_action se ejecuta después de la navegación y del
+    # network_idle). En el log del run 33119160851 se ve el solver
+    # terminando OK ("Cloudflare captcha is solved", 21:41:03) y un
+    # segundo después el pantallazo del goto que había acá (21:41:04):
+    # esa recarga desmontaba el widget ya resuelto y volvía a arrancar un
+    # Turnstile virgen, tirando el token a la basura.
+    page.wait_for_selector("#usuario", timeout=30000)
     captura(page, "01_login_page")
 
     # El formulario trae un campo señuelo (#usuario_v2 — 0x0 vía CSS
@@ -160,35 +193,34 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # específico, nunca lo tocamos, igual que un usuario real.
     _tipear(page, "#usuario", frax_user)
     _tipear(page, "#clave", frax_pass)
-    # Pantallazo intermedio, antes del click — para confirmar que los
-    # campos realmente quedan cargados (los pantallazos post-click
-    # siempre se ven vacíos porque ya reflejan la navegación automática a
-    # login.php?error=captcha que dispara el propio submit fallido, no
-    # porque el fill no haya funcionado).
-    captura(page, "01b_campos_llenos")
-    page.click("button.btn-login")
-    captura(page, "02_despues_click_login")
 
-    # El submit del login dispara acá (no en la carga inicial de
-    # login.php) un Turnstile embebido que `solve_cloudflare=True` no
-    # cubre. Reintento combinado: clickear el checkbox si aparece (sin
-    # esto se queda sin marcar para siempre, confirmado en pantallazos)
-    # Y volver a llenar RUT/clave (se pierden con el reload que dispara
-    # el propio submit fallido) antes de reenviar.
-    try:
-        page.wait_for_url("**/index.php**", timeout=15000)
-    except Exception:
-        captura(page, "03_error_primer_intento")
+    # Gate obligatorio: nunca clickear "Entrar" sin token de Turnstile.
+    # Tipear arriba ya consume ~8s, que le dan aire al token asíncrono.
+    if not _esperar_token(page, segundos=20):
+        captura(page, "01c_sin_token_reintento_checkbox")
         _click_turnstile_si_aparece(page, captura)
-        _tipear(page, "#usuario", frax_user)
-        _tipear(page, "#clave", frax_pass)
-        captura(page, "03b_campos_rellenados")
-        page.click("button.btn-login")
-        try:
-            page.wait_for_url("**/index.php**", timeout=15000)
-        except Exception:
-            captura(page, "03_timeout_esperando_index")
-            raise
+        if not _esperar_token(page, segundos=30):
+            captura(page, "02_sin_token_turnstile")
+            raise RuntimeError(
+                "Turnstile no entregó token: el widget escaló a modo interactivo "
+                "y el checkbox fue rechazado. Hace falta browser/IP nueva "
+                "(lo maneja with_retries en sync.py), no reintentar acá."
+            )
+
+    captura(page, "01b_campos_llenos_con_token")
+    page.click("button.btn-login")
+
+    # Ya no se reintenta el submit sobre esta misma página: una vez que el
+    # portal responde login.php?error=captcha, el Turnstile de esa página
+    # queda quemado ("Verification failed" en el pantallazo
+    # 214134_03b_campos_rellenados del run 33119160851) y reenviar ahí
+    # nunca funcionó — 6 corridas seguidas fallando lo confirman. El
+    # reintento real es un browser nuevo, vía with_retries().
+    try:
+        page.wait_for_url("**/index.php**", timeout=20000)
+    except Exception:
+        captura(page, "02_login_rechazado")
+        raise RuntimeError(f"El login no llegó a index.php (quedó en {page.url}).")
     captura(page, "03_index_ok")
 
     # Aviso de "cuenta con pago pendiente" — no está confirmado que
