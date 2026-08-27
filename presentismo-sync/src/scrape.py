@@ -96,38 +96,28 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # específico, nunca lo tocamos, igual que un usuario real.
     page.fill("#usuario", frax_user)
     page.fill("#clave", frax_pass)
+    # Pantallazo intermedio, antes del click — para confirmar que los
+    # campos realmente quedan cargados (los pantallazos post-click
+    # siempre se ven vacíos porque ya reflejan la navegación automática a
+    # login.php?error=captcha que dispara el propio submit fallido, no
+    # porque el fill no haya funcionado).
+    captura(page, "01b_campos_llenos")
     page.click("button.btn-login")
     captura(page, "02_despues_click_login")
 
     # El submit del login dispara acá (no en la carga inicial de
     # login.php) un Turnstile embebido que `solve_cloudflare=True` no
-    # cubre. Probamos primero clickear el checkbox a mano cuando escala a
-    # modo interactivo, pero en una corrida real (33113513039) el
-    # checkbox quedaba bien marcado y aun así Cloudflare lo rechazaba
-    # server-side ("Verification failed") las veces que se probó —
-    # confirmado con el usuario, que a mano SÍ pudo loguearse volviendo a
-    # cargar `login.php` limpio (sin
-    # `?error=captcha`) en vez de forcejear el checkbox ya escalado en la
-    # página de error. Por eso el reintento recarga `login.php` desde
-    # cero cada vez, apostando a que el challenge vuelva a evaluarse en
-    # modo invisible (el que sí pasó solo, sin checkbox, en la corrida
-    # exitosa 33080161187) en lugar de seguir en el modo interactivo ya
-    # marcado como sospechoso.
-    max_intentos_login = 3
-    for intento in range(1, max_intentos_login + 1):
-        try:
-            page.wait_for_url("**/index.php**", timeout=15000)
-            break
-        except Exception:
-            if intento == max_intentos_login:
-                captura(page, "03_timeout_esperando_index")
-                raise
-            captura(page, f"03_reintento_{intento}")
-            page.goto(f"{BASE_URL}/login.php")
-            page.fill("#usuario", frax_user)
-            page.fill("#clave", frax_pass)
-            page.click("button.btn-login")
-            captura(page, f"03b_reintento_login_{intento}")
+    # cubre. Probamos clickear el checkbox a mano cuando escala a modo
+    # interactivo y también recargar login.php limpio y reintentar
+    # dentro de la misma sesión del navegador — ninguna de las dos
+    # sirvió de forma consistente (runs 33113513039 y 33116630944).
+    # Un solo intento acá; el reintento con backoff creciente y sesión
+    # de navegador 100% nueva lo hace `with_retries()` en sync.py.
+    try:
+        page.wait_for_url("**/index.php**", timeout=15000)
+    except Exception:
+        captura(page, "03_timeout_esperando_index")
+        raise
     captura(page, "03_index_ok")
 
     # Aviso de "cuenta con pago pendiente" — no está confirmado que
