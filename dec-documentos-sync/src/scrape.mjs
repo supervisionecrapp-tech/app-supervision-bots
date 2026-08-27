@@ -3,7 +3,6 @@ import { mkdirSync } from "node:fs";
 import AdmZip from "adm-zip";
 
 const PORTAL_URL = "https://5.dec.cl/portal";
-const REPORTERIA_URL = "https://5.dec.cl/reporteria";
 const LISTADO_URL = "https://5.dec.cl/reporteria/listado_reportes";
 
 // El botón de submit del login federado cambia de texto entre pasos
@@ -209,7 +208,19 @@ async function login(page, decUser, decPass, downloadDir) {
 }
 
 async function triggerReporte(page, downloadDir, waitMultiplier) {
-  await page.goto(REPORTERIA_URL);
+  // OJO (confirmado por la corrida #11 real): un `page.goto("https://5.dec.cl/reporteria")`
+  // directo justo después de cambiar de empresa falla con
+  // `net::ERR_ABORTED` — el click de "cambiar institución" dispara su
+  // propia navegación/reload y el goto entra en carrera con eso. La
+  // solución real, confirmada en vivo, es navegar como un usuario real: el
+  // ícono de aplicaciones (grilla, arriba a la derecha) → tile
+  // "Reportería" — `button.dropdown-toggle` dentro del mismo `.dropdown`
+  // que contiene `a.launcher-wrapper`, y el tile es
+  // `<a class="btn btn-info launcher-wrapper">Reportería</a>`.
+  await page
+    .locator(".dropdown:has(a.launcher-wrapper) button.dropdown-toggle")
+    .click();
+  await page.locator("a.launcher-wrapper", { hasText: "Reportería" }).click();
   await page.waitForLoadState("networkidle").catch(() => {});
 
   // Ids reales del formulario, confirmados leyendo el DOM real (no
