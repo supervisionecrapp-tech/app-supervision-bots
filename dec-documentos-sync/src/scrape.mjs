@@ -78,21 +78,27 @@ async function login(page, decUser, decPass, downloadDir) {
   await debugShot(page, downloadDir, "01-form-login-federado");
 
   // Confirmado en vivo: primero hay que elegir país (opción "Chile") y
-  // recién ahí aparece el input de RUT (placeholder real
-  // "Ingresa tu RUT/DNI", id="taxpayer_id") y el botón "ENTRAR".
+  // recién ahí aparece el input de RUT y el botón "ENTRAR".
   //
-  // OJO (confirmado por la corrida #5 real): el widget a veces no
-  // reacciona al primer selectOption — el campo de RUT queda en el DOM
-  // pero `hidden` (visto 2 de 3 intentos en la misma corrida, así que es
-  // flaky, no un fallo sistemático). Un segundo selectOption alcanzó en la
-  // práctica para destrabarlo.
+  // OJO (confirmado por la corrida #6 real, error mío en un fix anterior):
+  // el campo REAL para Chile tiene placeholder exacto "Ingresa tu RUT" —
+  // "Ingresa tu RUT/DNI" (id="taxpayer_id") es un campo DISTINTO, oculto,
+  // de otro paso/país del mismo formulario multi-país. Un selector por
+  // "Ingresa tu RUT/DNI" matchea ese decoy oculto y nunca se vuelve
+  // visible (falló 3/3 intentos). La captura debug-02-pais-seleccionado.png
+  // de esa corrida confirma que, apenas se elige Chile, el campo visible
+  // real ya dice "Ingresa tu RUT" (sin "/DNI").
   await paisSelect.selectOption({ label: "Chile" });
   await debugShot(page, downloadDir, "02-pais-seleccionado");
 
-  const rutInput = page.getByPlaceholder("Ingresa tu RUT/DNI");
+  const rutInput = page.getByPlaceholder("Ingresa tu RUT", { exact: true });
   try {
     await rutInput.waitFor({ state: "visible", timeout: 8000 });
   } catch {
+    // Sí confirmado como flaky en la corrida #5 (2 de 3 intentos): a veces
+    // el widget no reacciona al primer selectOption. Reintentar alcanzó
+    // ahí — se deja como red de seguridad, aunque la causa raíz de la
+    // corrida #6 era el selector equivocado, no esto.
     console.log("Campo de RUT seguía oculto tras seleccionar país, reintentando selectOption…");
     await paisSelect.selectOption({ label: "Chile" });
     await rutInput.waitFor({ state: "visible", timeout: 15000 });
