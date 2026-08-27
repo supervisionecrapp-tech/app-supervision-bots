@@ -14,11 +14,20 @@ const UPSERT_BATCH = 500;
 
 /** Para un rut y fecha dados, busca la asignación vigente esa fecha
  * (fecha_inicio <= fecha <= fecha_fin, o fecha_fin null = sigue vigente).
- * Si hay más de una que matchea (no debería, pero por si acaso) se queda
- * con la de fecha_inicio más reciente. rut se normaliza porque GV no es
- * consistente con mayúsculas/minúsculas del RUT entre sus propios
- * endpoints — sin esto el cruce fallaba en silencio (mismo bug que el de
- * grupo_gv en roster.mjs). */
+ * rut se normaliza porque GV no es consistente con mayúsculas/minúsculas
+ * del RUT entre sus propios endpoints — sin esto el cruce fallaba en
+ * silencio (mismo bug que el de grupo_gv en roster.mjs).
+ *
+ * Una persona con "ruta" tiene VARIAS asignaciones vigentes a la vez, una
+ * por sala (ver migración 20260826080000) — esto es el caso normal para
+ * esas personas, no una excepción. cbtrs_asignaciones no guarda calendario
+ * ni día de la semana por sala, así que hoy no hay forma de saber en cuál
+ * de sus salas estaba programada la persona el día puntual de la ausencia;
+ * se elige la de fecha_inicio más reciente y, en empate, la de sala_id
+ * menor (comparación de string) para que el resultado sea determinístico
+ * y reproducible entre corridas — no para que sea necesariamente la sala
+ * correcta. Si se llega a necesitar precisión real por sala/día para gente
+ * con ruta, hace falta agregar esa información al esquema. */
 function resolverAsignacion(asignacionesPorRut, rut, fechaISO) {
   const lista = asignacionesPorRut.get(normalizeRut(rut));
   if (!lista) return null;
@@ -26,7 +35,9 @@ function resolverAsignacion(asignacionesPorRut, rut, fechaISO) {
   for (const a of lista) {
     if (a.fecha_inicio > fechaISO) continue;
     if (a.fecha_fin != null && a.fecha_fin < fechaISO) continue;
-    if (!mejor || a.fecha_inicio > mejor.fecha_inicio) mejor = a;
+    if (!mejor) { mejor = a; continue; }
+    if (a.fecha_inicio > mejor.fecha_inicio) { mejor = a; continue; }
+    if (a.fecha_inicio === mejor.fecha_inicio && String(a.sala_id) < String(mejor.sala_id)) mejor = a;
   }
   return mejor;
 }
@@ -61,6 +72,13 @@ export async function sync(supabase, { desde, hasta }) {
   //    ventana de marcaje, y eso no es una ausencia todavía, Y
   //  - no tiene un permiso/licencia/vacaciones aprobado ese día (TimeOffs) —
   //    si GV ya registró un permiso, no es una ausencia sin cobertura.
+  // shift_begins (Shifts[].Begins) se asume en hora Santiago, no GMT0 —
+  // verificado empíricamente contra datos reales sincronizados: la
+  // distribución de turno_inicio_programado tiene su pico en 08:00 y se
+  // concentra entre 07:00-17:00 (con casos sueltos a las 22:30), calzando
+  // con un horario retail chileno normal. Si viniera en GMT0 ese pico
+  // caería a las 04:00-05:00 hora Santiago, que no tiene sentido para
+  // apertura de tienda — descartado.
   const nowSantiago = nowSantiagoYyyyMmDdHhMmSs();
   const filas = gvUsersToFilas(attendance).filter(
     (f) => f.absent && !f.timeoff_type && f.shift_begins && f.shift_begins <= nowSantiago,

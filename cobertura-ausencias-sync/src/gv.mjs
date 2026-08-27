@@ -22,9 +22,21 @@ export function todaySantiagoYyyyMmDd() {
   return fmt.format(new Date()).replaceAll("-", "");
 }
 
-export function primerDiaMesSantiagoYyyyMmDd() {
-  const hoy = todaySantiagoYyyyMmDd();
-  return `${hoy.slice(0, 6)}01`;
+// Reconciliación (ver core.mjs) solo revisa/borra dentro del rango
+// sincronizado — una corrección tardía en GV (permiso aprobado después,
+// turno reprogramado) para una fecha fuera de ese rango nunca se vuelve a
+// mirar. El bot corre en GitHub Actions (sin el límite de timeout del
+// gateway de Edge Functions), así que puede permitirse una ventana más
+// ancha que "mes en curso" para cubrir esos casos sin caer en el 504 que
+// sí afecta al botón manual del admin.
+export function haceNDiasSantiagoYyyyMmDd(n) {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(new Date(Date.now() - n * 86400000)).replaceAll("-", "");
 }
 
 // Comparable lexicográficamente contra shift_begins (mismo formato

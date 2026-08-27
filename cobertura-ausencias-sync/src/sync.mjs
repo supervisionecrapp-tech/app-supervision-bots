@@ -1,11 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
-import { todaySantiagoYyyyMmDd, primerDiaMesSantiagoYyyyMmDd } from "./gv.mjs";
+import { todaySantiagoYyyyMmDd, haceNDiasSantiagoYyyyMmDd } from "./gv.mjs";
 import { sync, logRun, requireEnv } from "./core.mjs";
 
-// Corrida programada (ver ../../.github/workflows/cobertura-ausencias-sync.yml)
-// y también lo que dispara el botón "Actualizar desde GeoVictoria" del
-// admin — mes en curso completo (día 1 → hoy), mismo criterio que
-// asistencia-sync/src/sync.mjs.
+// Corrida programada (ver ../../.github/workflows/cobertura-ausencias-sync.yml).
+// Ventana de 45 días hacia atrás (en vez de solo "mes en curso") para que la
+// reconciliación (ver core.mjs) alcance a limpiar ausencias que dejaron de
+// ser reales por una corrección tardía en GV (permiso aprobado después,
+// turno reprogramado) aunque hayan caído en el mes anterior. El botón
+// manual del admin (Edge Function) sigue limitado a rangos cortos por el
+// timeout del gateway; este bot corre en GitHub Actions y no tiene esa
+// restricción.
+const DIAS_HACIA_ATRAS = 45;
 
 async function withRetries(intentar, { maxIntentos = 3, esperaBaseMs = 30000 } = {}) {
   for (let intento = 1; intento <= maxIntentos; intento++) {
@@ -28,7 +33,7 @@ async function main() {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   const hasta = todaySantiagoYyyyMmDd();
-  const desde = primerDiaMesSantiagoYyyyMmDd();
+  const desde = haceNDiasSantiagoYyyyMmDd(DIAS_HACIA_ATRAS);
 
   console.log(`Sincronizando ausencias de Cobertura (GeoVictoria) ${desde}-${hasta}...`);
   const startedAt = new Date().toISOString();
