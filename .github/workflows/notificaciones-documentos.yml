@@ -2,10 +2,10 @@ name: Notificaciones Documentos Pendientes
 
 on:
   schedule:
-    # ~12:00 America/Santiago = ~16:00 UTC, lunes/miércoles/viernes. Minuto
-    # corrido a :09 (no redondo) — ver nota de por qué en
-    # notificaciones-semanal-lunes.yml.
-    - cron: "9 16 * * 1,3,5"
+    # ~13:00 America/Santiago = ~16:00 UTC, todos los días MENOS domingo
+    # (a pedido explícito). Minuto corrido a :09 (no redondo) — ver nota de
+    # por qué en notificaciones-semanal-lunes.yml.
+    - cron: "9 16 * * 1-6"
   workflow_dispatch:
 
 jobs:

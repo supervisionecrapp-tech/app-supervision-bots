@@ -153,7 +153,8 @@ nuevo el flujo real del portal.
 ## dec-documentos-sync
 
 Corre vía [`.github/workflows/dec-documentos-sync.yml`](./.github/workflows/dec-documentos-sync.yml):
-diario 07:00 Chile, `workflow_dispatch` manual soportado sin inputs.
+cada 3 horas (a pedido explícito, reemplaza la corrida diaria única del
+diseño original), `workflow_dispatch` manual soportado sin inputs.
 
 El portal DEC (5.dec.cl, firma electrónica de documentos — Sovos/Autentia)
 solo deja entrar a la cuenta `SOLUC_ESPECIALIZADAS_OUT_SA` por la tab
@@ -309,8 +310,8 @@ de "una fase, un workflow" que `venta-perdida-sync`):
   `teamcore-sync` dentro de esa ventana): avance del día combinado de
   Presentismo + Teamcore.
 - [`notificaciones-documentos.yml`](./.github/workflows/notificaciones-documentos.yml) —
-  lunes/miércoles/viernes 12:00 Chile: cantidad de documentos pendientes de
-  mercaderistas por supervisor.
+  13:00 Chile todos los días MENOS domingo: cantidad de documentos
+  pendientes de mercaderistas por supervisor.
 
 Destinatarios: todo `profiles` activo con `auth_user_id` (sin eso no hay
 `external_id` que targetear en OneSignal — se completa cuando la persona

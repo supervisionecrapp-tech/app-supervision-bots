@@ -2,11 +2,14 @@ name: DEC Documentos Sync
 
 on:
   schedule:
-    # Diario 07:00 America/Santiago = 11:00 UTC (Chile continental no
-    # cambia de huso todo el año) — antes de que notificaciones-documentos.yml
-    # corra lunes/miércoles/viernes 12:00 Chile, para que el recordatorio de
-    # documentos pendientes lea datos frescos del día.
-    - cron: "0 11 * * *"
+    # Cada 3 horas (a pedido explícito) — el offset UTC-3 de Chile
+    # (continental, sin horario de verano) no rompe el patrón de 3 en 3,
+    # así que no hace falta convertir a hora Chile. Corre a las xx:00 UTC
+    # = xx-3:00 Chile, ej. 11:00 UTC = 08:00 Chile, 14:00 UTC = 11:00
+    # Chile, etc. Antes de las 13:00 Chile (16:00 UTC) ya corrió al menos
+    # una vez desde medianoche, para que notificaciones-documentos.yml
+    # (13:00 Chile) lea datos frescos del día.
+    - cron: "0 */3 * * *"
   workflow_dispatch: {}
 
 jobs:
