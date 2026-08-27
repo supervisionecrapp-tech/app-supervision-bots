@@ -9,8 +9,17 @@ const LISTADO_URL = "https://5.dec.cl/reporteria/listado_reportes";
 // El botón de submit del login federado cambia de texto entre pasos
 // ("ENTRAR" para RUT, "CONTINUAR" para clave — confirmado en vivo) — se
 // prueba con los nombres conocidos en vez de hardcodear uno solo.
+//
+// OJO (confirmado por la corrida #7 real, que se colgó acá pese a que la
+// captura debug-99-error.png mostraba el botón "ENTRAR" perfectamente
+// visible en pantalla): el form es server-rendered clásico, el control
+// real es un <input type="submit"/"button" value="ENTRAR"> — NO un
+// <button>ENTRAR</button>. `page.locator("button:visible")` solo matchea
+// la etiqueta <button> y por eso nunca encontraba nada. getByRole SÍ
+// reconoce <input type=submit> por su rol ARIA (button), sea cual sea la
+// etiqueta HTML real — volver a esto en vez de un selector de tag fijo.
 async function clickSubmit(page) {
-  const btn = page.locator("button:visible").filter({ hasText: /^(ENTRAR|CONTINUAR)$/ });
+  const btn = page.getByRole("button", { name: /^(ENTRAR|CONTINUAR)$/ });
   await btn.first().click();
 }
 
