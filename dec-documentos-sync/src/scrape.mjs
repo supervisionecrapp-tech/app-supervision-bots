@@ -42,9 +42,7 @@ async function login(page, decUser, decPass, downloadDir) {
 
   // Confirmado en vivo con el usuario probando manualmente: esta cuenta NO
   // entra por la pestaña "Usar Pin" (RUT+clave directo en 5.dec.cl) — hay
-  // que usar "Identidad Digital", que redirige a un login federado OAuth2
-  // (servicios.dec.cl -> identidaddigital.acepta.com, proveedor externo
-  // Acepta).
+  // que usar "Identidad Digital", que redirige a un login federado OAuth2.
   //
   // OJO (confirmado por la corrida #1 real, que falló acá): la página tiene
   // DOS botones "Ingresar" al mismo tiempo, uno por cada tab del login
@@ -58,64 +56,56 @@ async function login(page, decUser, decPass, downloadDir) {
   await page.getByText("Identidad Digital", { exact: true }).click();
   await page.locator("#id-login").click();
 
-  // OJO (confirmado por la corrida #2 real): esperar solo /5\.dec\.cl/ acá
-  // es ambiguo — esa misma regex matchea TANTO la pantalla de login
-  // (5.dec.cl/auth) COMO el portal ya autenticado (5.dec.cl/portal), así
-  // que no sirve para confirmar nada. Hay que esperar específicamente a
-  // salir de 5.dec.cl hacia el proveedor externo.
-  await page.waitForURL(/identidaddigital\.acepta\.com|servicios\.dec\.cl/, { timeout: 20000 });
-  console.log(`Tras "Ingresar": ${page.url()}`);
-  await debugShot(page, downloadDir, "01-tras-ingresar");
+  // OJO (confirmado por la corrida #3 real, que se colgó acá): el
+  // formulario de país/RUT/clave en realidad queda SERVIDO DESDE
+  // servicios.dec.cl — NO redirige a identidaddigital.acepta.com salvo en
+  // casos borde (se vio ese dominio una sola vez, al cancelar un flujo ya
+  // viciado a mano). Esperar un dominio específico es frágil (ya falló dos
+  // veces por asumir el dominio equivocado) — en vez de eso, esperamos
+  // directamente a que aparezca el <select> de país, el primer control
+  // real del formulario, sea cual sea el dominio final.
+  const paisSelect = page.locator("select").first();
+  await paisSelect.waitFor({ timeout: 20000 });
+  console.log(`Formulario de login federado cargado en: ${page.url()}`);
+  await debugShot(page, downloadDir, "01-form-login-federado");
 
-  // Si cayó en servicios.dec.cl (paso intermedio del OAuth) en vez de
-  // directo en Acepta, esperar el segundo salto.
-  if (!/identidaddigital\.acepta\.com/.test(page.url())) {
-    await page.waitForURL(/identidaddigital\.acepta\.com/, { timeout: 20000 });
-    console.log(`Tras servicios.dec.cl: ${page.url()}`);
-    await debugShot(page, downloadDir, "01b-tras-servicios-dec");
-  }
-
-  // Confirmado en vivo: primero hay que elegir país (<select>, opción
-  // "Chile") y recién ahí aparece el input de RUT (placeholder real
-  // "Ingresa tu RUT") y el botón "ENTRAR".
-  await page.locator("select").first().selectOption({ label: "Chile" });
+  // Confirmado en vivo: primero hay que elegir país (opción "Chile") y
+  // recién ahí aparece el input de RUT (placeholder real "Ingresa tu RUT")
+  // y el botón "ENTRAR".
+  await paisSelect.selectOption({ label: "Chile" });
   await debugShot(page, downloadDir, "02-pais-seleccionado");
 
   const rutInput = page.getByPlaceholder("Ingresa tu RUT");
   await rutInput.waitFor({ timeout: 10000 });
   await rutInput.fill(decUser);
-  console.log("RUT completado en Acepta, clic ENTRAR…");
+  console.log("RUT completado, clic ENTRAR…");
   await page.getByRole("button", { name: "ENTRAR" }).click();
-  await page.waitForTimeout(1500);
   await debugShot(page, downloadDir, "03-tras-rut-entrar");
 
-  // Confirmar que seguimos en Acepta antes de tocar el campo de clave — si
-  // no, el error queda claro acá en vez de arrastrarse como un timeout
-  // confuso más adelante en Reportería (lo que pasó en la corrida #2: el
-  // login "no tiró error" pero en realidad nunca completó, y recién se
-  // notó cuando #filtro-reporte no apareció).
-  if (!/identidaddigital\.acepta\.com/.test(page.url())) {
+  // Confirmar que apareció el campo de clave antes de tocarlo — si no, el
+  // error queda claro acá en vez de arrastrarse como un timeout confuso
+  // más adelante en Reportería (lo que pasó en la corrida #2: el login "no
+  // tiró error" pero en realidad nunca completó).
+  const claveInput = page.locator('input[type="password"]').first();
+  try {
+    await claveInput.waitFor({ timeout: 10000 });
+  } catch {
     throw new Error(
-      `Tras completar el RUT, la página salió de Acepta antes de pedir la clave (quedó en ${page.url()}) — revisar debug-03-tras-rut-entrar.png de esta corrida.`,
+      `Tras completar el RUT, no apareció el campo de clave (quedó en ${page.url()}) — revisar debug-03-tras-rut-entrar.png de esta corrida.`,
     );
   }
-
-  // NO CONFIRMADO todavía contra una corrida 100% exitosa: se asume un
-  // <input type="password"> estándar en la misma pantalla. Si esto falla,
-  // revisar debug-03-tras-rut-entrar.png/04-tras-clave.png de esa corrida.
-  const claveInput = page.locator('input[type="password"]').first();
-  await claveInput.waitFor({ timeout: 10000 });
   await claveInput.fill(decPass);
-  console.log("Clave completada en Acepta, clic ENTRAR…");
+  console.log("Clave completada, clic ENTRAR…");
   await debugShot(page, downloadDir, "04-tras-clave");
   await page.getByRole("button", { name: "ENTRAR" }).click();
 
-  // El reCAPTCHA visible en la pantalla de Acepta es la mayor incógnita de
-  // este login (no se confirmó si es v2 checkbox o v3 invisible) — si
-  // bloquea a Playwright headless corriendo desde IP de datacenter de
-  // GitHub Actions, revisar debug-04-tras-clave.png / 05-post-login.png
-  // primero (mismo tipo de bloqueo que tuvo presentismo-sync con
-  // Cloudflare Turnstile).
+  // El reCAPTCHA visible en esta pantalla es la mayor incógnita de este
+  // login (no se confirmó si es v2 checkbox o v3 invisible) — si bloquea a
+  // Playwright headless corriendo desde IP de datacenter de GitHub
+  // Actions, revisar debug-04-tras-clave.png / 05-post-login.png primero
+  // (mismo tipo de bloqueo que tuvo presentismo-sync con Cloudflare
+  // Turnstile — el fallback documentado ahí es Python+Scrapling/Camoufox
+  // en vez de Playwright puro).
 
   await page.waitForURL(/5\.dec\.cl/, { timeout: 30000 });
   await page.waitForLoadState("networkidle").catch(() => {});
