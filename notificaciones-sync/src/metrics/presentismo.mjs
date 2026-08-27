@@ -50,6 +50,8 @@ export async function computeSemanaPasada(supabase, salas, anio, semana) {
   const realById = new Map((realizadas ?? []).map((r) => [r.sala_id, r.horas_realizadas_total ?? 0]));
   let sumTarget = 0;
   let sumReal = 0;
+  let sobrecumplimiento = 0;
+  let faltante = 0;
   let peorSala = null;
   let peorPct = Infinity;
   for (const row of objetivo ?? []) {
@@ -57,7 +59,14 @@ export async function computeSemanaPasada(supabase, salas, anio, semana) {
     if (target <= 0) continue;
     const real = realById.get(row.sala_id) ?? 0;
     sumTarget += target;
-    sumReal += real;
+    // Se topa en el objetivo de la sala antes de sumar — el presentismo nunca
+    // debe pasar de 100%, y el exceso de una sala no debe tapar el déficit de
+    // otra en el agregado (mismo criterio que mobile/presentismo.tsx).
+    sumReal += Math.min(real, target);
+    // Documentado aparte, sin afectar el %: no se usa en la notificación por
+    // defecto, pero queda disponible para quien consuma este metric.
+    if (real > target) sobrecumplimiento += real - target;
+    else faltante += target - real;
     const pct = real / target;
     if (pct < peorPct) {
       peorPct = pct;
@@ -65,7 +74,7 @@ export async function computeSemanaPasada(supabase, salas, anio, semana) {
     }
   }
   if (sumTarget === 0) return null;
-  return { pct: sumReal / sumTarget, peorSalaNombre: peorSala?.nombre_geo ?? "—" };
+  return { pct: sumReal / sumTarget, sobrecumplimiento, faltante, peorSalaNombre: peorSala?.nombre_geo ?? "—" };
 }
 
 /** % agregado del día en curso (semana ISO actual, columna del día de hoy),
@@ -88,12 +97,18 @@ export async function computeHoy(supabase, salas, hoy, anio, semana) {
   const realById = new Map((realizadas ?? []).map((r) => [r.sala_id, r.horas_realizadas ?? 0]));
   let sumTarget = 0;
   let sumReal = 0;
+  let sobrecumplimiento = 0;
+  let faltante = 0;
   for (const row of objetivo ?? []) {
     const target = row[col];
     if (target == null) continue;
+    const real = realById.get(row.sala_id) ?? 0;
     sumTarget += target;
-    sumReal += realById.get(row.sala_id) ?? 0;
+    // Tope por sala/día antes de sumar — ver nota en computeSemanaPasada().
+    sumReal += Math.min(real, target);
+    if (real > target) sobrecumplimiento += real - target;
+    else faltante += target - real;
   }
   if (sumTarget === 0) return null;
-  return { pct: sumReal / sumTarget };
+  return { pct: sumReal / sumTarget, sobrecumplimiento, faltante };
 }
