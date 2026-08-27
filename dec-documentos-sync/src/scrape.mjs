@@ -147,6 +147,7 @@ async function login(page, decUser, decPass, downloadDir) {
   console.log("Clave completada, clic Continuar…");
   await debugShot(page, downloadDir, "04-tras-clave");
   await clickSubmit(page);
+  await page.waitForLoadState("networkidle").catch(() => {});
 
   // El reCAPTCHA visible en esta pantalla es la mayor incógnita de este
   // login (no se confirmó si es v2 checkbox o v3 invisible) — si bloquea a
@@ -155,6 +156,22 @@ async function login(page, decUser, decPass, downloadDir) {
   // (mismo tipo de bloqueo que tuvo presentismo-sync con Cloudflare
   // Turnstile — el fallback documentado ahí es Python+Scrapling/Camoufox
   // en vez de Playwright puro).
+
+  // Confirmado en vivo (con el usuario haciendo el login real y avisando
+  // antes de tocar nada): tras completar RUT+clave, el flujo NO vuelve
+  // directo a 5.dec.cl — pasa por una pantalla de consentimiento OAuth
+  // ("Accede con Identidad Digital... ¿Autorizar acceso a Información
+  // básica?") en `servicios.dec.cl/oauth2/v2/auth/authorize`. Botón real:
+  // `<input id="submit" type="submit" value="Autorizar">` (mismo patrón de
+  // mayúsculas via CSS que "Entrar"/"Continuar" — el texto real es
+  // "Autorizar", no "AUTORIZAR"). No siempre debería aparecer (ej. si la
+  // sesión ya autorizó el scope antes), así que no es un error si no está.
+  const autorizarBtn = page.getByRole("button", { name: /^autorizar$/i });
+  if (await autorizarBtn.count()) {
+    console.log("Pantalla de consentimiento OAuth detectada, clic Autorizar…");
+    await debugShot(page, downloadDir, "04b-consentimiento");
+    await autorizarBtn.first().click();
+  }
 
   await page.waitForURL(/5\.dec\.cl/, { timeout: 30000 });
   await page.waitForLoadState("networkidle").catch(() => {});
