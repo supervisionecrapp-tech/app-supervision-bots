@@ -80,7 +80,24 @@ def _click_turnstile_si_aparece(page, captura, *, intentos_espera: int = 20) -> 
     y = box["y"] + randint(25, 27)
     page.mouse.click(x, y, delay=randint(100, 200), button="left")
     captura(page, "turnstile_clickeado")
-    page.wait_for_timeout(1000)
+
+    # El checkbox pasa a "marcado" casi al instante del click, pero el
+    # intercambio con Cloudflare que llena el input oculto
+    # cf-turnstile-response (el que el formulario necesita al reenviar)
+    # tarda unos segundos más — confirmado en pantallazos de una corrida
+    # real (run 33112307497): reenviar el login apenas se ve el check
+    # marcado, sin esperar el token, repite el mismo fallo porque el
+    # formulario todavía viaja sin token válido. `cf-turnstile-response`
+    # es el nombre de campo estándar que inyecta el widget de Turnstile.
+    token_input = page.locator('input[name="cf-turnstile-response"]')
+    for _ in range(16):
+        try:
+            if token_input.count() > 0 and (token_input.first.input_value() or "").strip():
+                break
+        except Exception:
+            pass
+        page.wait_for_timeout(500)
+    captura(page, "turnstile_token_listo")
     return True
 
 
