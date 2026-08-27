@@ -107,17 +107,28 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
 
     # El submit del login dispara acá (no en la carga inicial de
     # login.php) un Turnstile embebido que `solve_cloudflare=True` no
-    # cubre. Probamos clickear el checkbox a mano cuando escala a modo
-    # interactivo y también recargar login.php limpio y reintentar
-    # dentro de la misma sesión del navegador — ninguna de las dos
-    # sirvió de forma consistente (runs 33113513039 y 33116630944).
-    # Un solo intento acá; el reintento con backoff creciente y sesión
-    # de navegador 100% nueva lo hace `with_retries()` en sync.py.
+    # cubre. Ya probamos clickear el checkbox a mano y también recargar
+    # login.php limpio antes de reintentar — ninguna de las dos sirvió de
+    # forma consistente (runs 33113513039 y 33116630944). A pedido del
+    # usuario: sin navegar a ningún lado, sobre la misma
+    # login.php?error=captcha, volver a llenar RUT/clave y reintentar el
+    # submit una vez — confirmado que el fill sí funciona bien
+    # (pantallazo 01b_campos_llenos con "Formato correcto" en verde), así
+    # que si esto tampoco alcanza el problema es Cloudflare rechazando la
+    # sesión, no el llenado del formulario.
     try:
         page.wait_for_url("**/index.php**", timeout=15000)
     except Exception:
-        captura(page, "03_timeout_esperando_index")
-        raise
+        captura(page, "03_error_primer_intento")
+        page.fill("#usuario", frax_user)
+        page.fill("#clave", frax_pass)
+        captura(page, "03b_campos_rellenados")
+        page.click("button.btn-login")
+        try:
+            page.wait_for_url("**/index.php**", timeout=15000)
+        except Exception:
+            captura(page, "03_timeout_esperando_index")
+            raise
     captura(page, "03_index_ok")
 
     # Aviso de "cuenta con pago pendiente" — no está confirmado que
