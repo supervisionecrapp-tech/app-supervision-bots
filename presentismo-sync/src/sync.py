@@ -31,12 +31,20 @@ def read_fecha() -> dt.date:
     return dt.datetime.now(SANTIAGO).date()
 
 
-def with_retries(intentar, max_intentos: int = 3, espera_base_s: int = 60):
+def with_retries(intentar, max_intentos: int = 4, espera_base_s: int = 90):
     """Reintenta `intentar()` hasta `max_intentos` veces, con espera
-    creciente (60s, 120s, ...) — mismo criterio que el resto de los bots
-    de este repo: el portal puede fallar por timing/red de forma
-    transitoria, o el desafío de Cloudflare puede no resolverse en un
-    intento puntual."""
+    EXPONENCIAL (90s, 180s, 360s, ...) entre intentos.
+
+    Backoff exponencial en vez de lineal, a propósito: confirmado a mano
+    por el usuario (corriendo el login manualmente muchas veces seguidas
+    desde la misma IP) que el portal empieza a escalar el challenge de
+    Cloudflare a modo interactivo cuanto más seguido se lo golpea — mismo
+    criterio que documenta Scrapling para su AutoThrottle
+    (`autothrottle_block_backoff`): cualquier respuesta bloqueada DUPLICA
+    el delay del dominio en vez de un incremento fijo, precisamente para
+    no seguir alimentando esa escalada. Los reintentos rápidos (lineal,
+    60/120s) que probamos antes nunca le daban tiempo a la sesión/IP a
+    "enfriarse" entre intento e intento."""
     for intento in range(1, max_intentos + 1):
         try:
             return intentar()
@@ -45,7 +53,7 @@ def with_retries(intentar, max_intentos: int = 3, espera_base_s: int = 60):
             print(f"Intento {intento}/{max_intentos} falló: {err}", file=sys.stderr)
             if es_ultimo:
                 raise
-            espera_s = espera_base_s * intento
+            espera_s = espera_base_s * (2 ** (intento - 1))
             print(f"Reintentando en {espera_s}s...")
             time.sleep(espera_s)
 
@@ -90,11 +98,7 @@ def main() -> None:
                 file_path=file_path, supabase_url=supabase_url, supabase_service_key=supabase_service_key
             )
 
-        # TODO: volver a max_intentos=3 (default) una vez que encontremos
-        # una estrategia que pase el Turnstile de forma confiable — en
-        # 1 mientras iteramos a mano para no esperar los 60s+120s de
-        # backoff en cada prueba.
-        result = with_retries(intentar, max_intentos=1)
+        result = with_retries(intentar)
         print(
             f"Listo: {result['cargadas']}/{result['total']} marcaciones cargadas "
             f"({result['sin_sala']} sin sala reconocida)."

@@ -2,26 +2,35 @@
 
 Puerto a Python/Scrapling del bot Node/Playwright que existió hasta
 2026-08-21 (ver git log de este repo: "Eliminar presentismo-sync").
-Se eliminó porque controltienda.com está detrás de Cloudflare y bloquea a
-Chromium headless y a Chrome headed corriendo desde una IP de datacenter
-(GitHub Actions) con un checkbox Turnstile no resoluble por automatización
-normal — solo funcionaba con Chrome real desde una IP residencial.
 
-Este puerto usa `StealthyFetcher` (Camoufox) de Scrapling con
-`solve_cloudflare=True`, que automatiza específicamente el resuelto de
-Turnstile — algo que Playwright liso no hacía. Sigue sin garantía: si el
-portal escala a un challenge que Camoufox tampoco resuelve, esta función
-lanza una excepción como cualquier otro fallo y el intento se reintenta
-(ver sync.py).
+Usa `StealthyFetcher` de Scrapling (Chromium/Chrome vía Patchright, NO
+Camoufox pese a lo que decía una versión vieja de este comentario —
+confirmado leyendo el código fuente instalado de scrapling 0.4.15) con
+`solve_cloudflare=True`. Ese solver resuelve el challenge de la carga
+inicial de `login.php`, pero corre UNA sola vez, antes de nuestro
+`page_action` — no cubre el Turnstile embebido que este portal dispara
+recién al hacer submit del login (ver `_click_turnstile_si_aparece`).
+
+Diseño "flexible" (a pedido del usuario, tras varias corridas de
+diagnóstico con pantallazos):
+1. Login normal, tipeando RUT/clave con delay (no `page.fill()`, que no
+   dispara eventos de teclado reales).
+2. Si el submit es rechazado, se asume que escaló a modo interactivo:
+   clickear el checkbox de Turnstile si aparece, volver a llenar
+   RUT/clave (se pierden con el reload que dispara el propio submit
+   fallido) y reintentar el submit una vez, dentro de la misma sesión.
+3. Si eso también falla, la función tira una excepción y listo — el
+   reintento real pasa a `with_retries()` en sync.py, con un browser
+   100% nuevo y espera EXPONENCIAL entre intentos (no lineal): confirmado
+   a mano por el usuario que golpear el login muchas veces seguidas
+   desde la misma IP hace que el portal escale el challenge cada vez más
+   rápido, y Scrapling documenta el mismo criterio para su AutoThrottle
+   (`autothrottle_block_backoff`): cualquier respuesta bloqueada DUPLICA
+   el delay en vez de un incremento fijo, para no seguir alimentando esa
+   escalada.
 
 Selectores DOM confirmados contra el portal real en la versión anterior
 (commit 7e72463 y ba860d8 de este mismo repo) — no adivinados.
-
-Confirmado en una corrida real (2026-08-21, GitHub Actions): con
-Camoufox el portal deja pasar sin mostrar ningún challenge — Scrapling
-loguea "ERROR: No Cloudflare challenge found" en ese caso, pero es
-informativo, no un fallo (`solve_cloudflare` busca un challenge para
-resolverlo y simplemente no encontró ninguno esa vez).
 """
 
 from __future__ import annotations
