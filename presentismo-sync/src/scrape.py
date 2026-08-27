@@ -28,10 +28,19 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
+from random import randint
 
 from scrapling.fetchers import StealthyFetcher
 
 BASE_URL = "https://www.controltienda.com/proveedor_server"
+
+
+def _tipear(page, selector: str, texto: str) -> None:
+    """Tipea carácter por carácter con delay variable, en vez de
+    `page.fill()` (que carga el valor directo por CDP sin disparar
+    eventos de teclado reales) — a pedido del usuario, buscando que el
+    login se vea más humano ante el chequeo de riesgo de Cloudflare."""
+    page.locator(selector).press_sequentially(texto, delay=randint(60, 140))
 
 
 def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path) -> Path:
@@ -94,8 +103,8 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # (#usuario, autocomplete="organization"): un honeypot anti-bot
     # confirmado inspeccionando el DOM en vivo. Llenamos por selector
     # específico, nunca lo tocamos, igual que un usuario real.
-    page.fill("#usuario", frax_user)
-    page.fill("#clave", frax_pass)
+    _tipear(page, "#usuario", frax_user)
+    _tipear(page, "#clave", frax_pass)
     # Pantallazo intermedio, antes del click — para confirmar que los
     # campos realmente quedan cargados (los pantallazos post-click
     # siempre se ven vacíos porque ya reflejan la navegación automática a
@@ -120,8 +129,8 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
         page.wait_for_url("**/index.php**", timeout=15000)
     except Exception:
         captura(page, "03_error_primer_intento")
-        page.fill("#usuario", frax_user)
-        page.fill("#clave", frax_pass)
+        _tipear(page, "#usuario", frax_user)
+        _tipear(page, "#clave", frax_pass)
         captura(page, "03b_campos_rellenados")
         page.click("button.btn-login")
         try:
