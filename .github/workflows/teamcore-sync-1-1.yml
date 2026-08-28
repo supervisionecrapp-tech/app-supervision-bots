@@ -14,10 +14,7 @@ on:
     # el bloqueo de `schedule` no depende del workflow ni del 2FA. Sigue
     # pendiente: ticket a GitHub Support. Hasta que se resuelva, estos bots
     # solo corren por workflow_dispatch manual.
-    #
-    # Re-test cada 1 min otra vez (28/08 ~20:4x UTC) — repetir el mismo
-    # chequeo por si el bloqueo tarda en levantarse tras el 2FA.
-    - cron: "* * * * *"
+    - cron: "0 15,17,19,21,23 * * *"
   workflow_dispatch:
     inputs:
       fecha:
