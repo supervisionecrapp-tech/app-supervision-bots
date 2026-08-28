@@ -332,7 +332,7 @@ comentarios en cada `src/metrics/*.mjs` para el detalle de cada una.
 ## presentismo-sync
 
 Corre vía [`presentismo-sync.yml`](./.github/workflows/presentismo-sync.yml):
-**diario 10:00 Chile**. Filtra el portal APE2 con "desde" = día anterior y
+**cada hora, 6:00 a 23:00 Chile**. Filtra el portal APE2 con "desde" = día anterior y
 "hasta" = hoy (sin tocar ese campo, a pedido explícito), descarga el Excel
 de la tabla "Detalle de marcas" y lo sube a `presentismo_registros` —
 mismo mapeo de columnas (`LOCAL`/`RUT PERSONA`/`ENTRADA`/`SALIDA`/etc.,
@@ -344,19 +344,78 @@ siendo el día anterior a esa).
 **A diferencia de los otros bots, usa Python + [Scrapling](https://github.com/D4Vinci/Scrapling)
 en vez de Node/Playwright.** Motivo: este mismo bot existió antes en
 Node/Playwright (ver git log — "Eliminar presentismo-sync") y se eliminó
-porque controltienda.com está detrás de Cloudflare y bloqueaba con un
-checkbox Turnstile irresoluble a Chromium headless y a Chrome headed
-corriendo desde la IP de datacenter de GitHub Actions (solo funcionaba con
-Chrome real desde una IP residencial). `StealthyFetcher` de Scrapling
-(navegador Camoufox) con `solve_cloudflare=True` automatiza
-específicamente el resuelto de Turnstile, algo que Playwright liso no
-hacía — pero **sigue sin garantía**: si el portal escala a un challenge
-que Camoufox tampoco resuelve, la corrida falla igual (con 3 reintentos
-con espera creciente, igual que los demás bots) y hay que revisar
-`bot_runs` (`bot = 'presentismo-sync'`). Si vuelve a fallar de forma
-sistemática, el fallback ya probado es la carga semi-manual de
-admin-panel.html (sección "Presentismo WM — Marcaciones"), que sigue
-intacta y no depende de este bot.
+porque controltienda.com está detrás de Cloudflare. `StealthyFetcher` de
+Scrapling (Chromium vía Patchright — **no** Camoufox, pese a lo que decía
+una versión vieja de este README; confirmado leyendo el código de
+scrapling 0.4.15) con `solve_cloudflare=True` automatiza el resuelto del
+Turnstile, algo que Playwright liso no hacía.
+
+Si falla, revisar `bot_runs` (`bot = 'presentismo-sync'`). El fallback ya
+probado es la carga semi-manual de admin-panel.html (sección "Presentismo
+WM — Marcaciones"), que sigue intacta y no depende de este bot.
+
+### Necesita un runner propio, no los de GitHub
+
+El **26/08/2026 ~19:00 Chile** el portal empezó a rechazar el login del
+bot, después de 27 corridas seguidas exitosas y **sin ningún cambio de
+código** (el último commit a este bot era del 21/08). El log de auditoría
+del propio portal lo registra como `Login bloqueado captcha / sin_token`.
+
+Diagnóstico, medido el 27/08:
+
+- El widget es `data-appearance="interaction-only"`: invisible mientras
+  Cloudflare esté conforme, y el token llega de forma asíncrona. El
+  `<form id="loginForm">` no tiene guardia JS, así que clickear "Entrar"
+  antes de que exista el token manda `cf-turnstile-response` vacío. Le
+  pasa también a usuarios reales en Chrome (confirmado: 3 `sin_token`
+  seguidos de una persona antes de entrar a la cuarta).
+- Corriendo **la misma config de Scrapling** (`real_chrome`, headful,
+  `locale=es-CL`, `timezone_id=America/Santiago`, perfil temporal limpio):
+
+  | Origen | Token de Turnstile |
+  |---|---|
+  | IP chilena normal | emitido en ~1s, widget nunca se muestra |
+  | Runners de GitHub (Azure) | nunca, el widget escala a checkbox |
+
+  En Actions se probó: headless; headful bajo xvfb; Chrome real; locale y
+  timezone chilenos; y click del checkbox con `xdotool` (click real del
+  servidor X, no CDP). Ninguna combinación obtiene token.
+
+La única variable sin igualar es la IP. Cambiar de librería (nodriver,
+SeleniumBase, botasaurus) **no ayuda**: el problema no es la huella del
+browser, y desde una IP buena no hace falta resolver ningún captcha.
+
+#### Apuntarlo a un runner propio
+
+1. Instalar el agente de Actions en una máquina de la red de la oficina
+   que quede prendida: *Settings > Actions > Runners > New self-hosted
+   runner*, siguiendo los pasos que da GitHub para ese SO.
+2. Instalarle Python 3.12+ y Google Chrome.
+3. En *Settings > Secrets and variables > Actions > Variables*, crear
+   `PRESENTISMO_RUNNER` con valor `self-hosted` (o la label del runner).
+
+El workflow ya lee esa variable
+(`runs-on: ${{ vars.PRESENTISMO_RUNNER || 'ubuntu-latest' }}`) y saltea el
+paso de xvfb fuera de Linux. No hay que tocar código.
+
+#### Correrlo a mano desde una máquina de confianza
+
+`sync.py` carga `presentismo-sync/.env.local` si existe (está en
+`.gitignore`, y nunca pisa lo que ya venga en el entorno, así que en CI es
+un no-op):
+
+```
+FRAX_USER=00012792
+FRAX_PASS=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+```bash
+cd presentismo-sync && python src/sync.py
+```
+
+Verificado el 27/08 desde una IP chilena: login OK y descarga del Excel
+con 331 filas.
 
 Selectores DOM confirmados contra el portal real en la versión Node
 anterior (no adivinados): login por `#usuario`/`#clave` (con honeypot
