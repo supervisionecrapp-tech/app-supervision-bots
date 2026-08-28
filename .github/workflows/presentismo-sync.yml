@@ -56,6 +56,11 @@ jobs:
         env:
           FRAX_USER: ${{ secrets.FRAX_USER }}
           FRAX_PASS: ${{ secrets.FRAX_PASS }}
+          # Si está puesta, el bot entra por sesión ya abierta y no toca el
+          # login (el Turnstile solo protege ese POST). Se genera con
+          # presentismo-sync/scripts/capturar_cookie.py desde una máquina de
+          # confianza. Si no está, cae al login normal.
+          FRAX_SESSION_COOKIE: ${{ secrets.FRAX_SESSION_COOKIE }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FECHA: ${{ github.event.inputs.fecha }}
         shell: bash

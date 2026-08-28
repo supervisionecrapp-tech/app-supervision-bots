@@ -38,6 +38,7 @@ Selectores DOM confirmados contra el portal real en la versión anterior
 from __future__ import annotations
 
 import datetime as dt
+import os
 import shutil
 import subprocess
 import time
@@ -216,7 +217,68 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
             raise
         return page
 
-    # `StealthySession` en vez de `StealthyFetcher.fetch`: hace falta poder
+    # Vía preferida: entrar con una sesión ya abierta y no tocar el login.
+    #
+    # El Turnstile solo protege el POST del login. Verificado el 28/08: un
+    # browser LIMPIO al que solo se le inyectan PHPSESSID y cf_clearance
+    # llega a /reportes/ sin pasar por login.php y sin captcha alguno. Como
+    # desde los runners de GitHub el token no se consigue (1 éxito en ~30
+    # intentos), esta es la vía que no depende de ganarle a Cloudflare.
+    #
+    # La cookie se saca corriendo `scripts/capturar_cookie.py` desde una
+    # máquina de confianza y se guarda como secret FRAX_SESSION_COOKIE.
+    cookie_sesion = (os.environ.get("FRAX_SESSION_COOKIE") or "").strip()
+    if cookie_sesion:
+        print("Hay FRAX_SESSION_COOKIE: se entra por cookie, sin pasar por el login.")
+
+        def entrar_con_cookie(page):
+            try:
+                page.context.add_cookies(
+                    [
+                        {
+                            "name": "PHPSESSID",
+                            "value": cookie_sesion,
+                            "domain": "www.controltienda.com",
+                            "path": "/",
+                            "httpOnly": True,
+                            "secure": True,
+                        }
+                    ]
+                )
+                page.goto(f"{BASE_URL}/reportes/")
+                try:
+                    page.wait_for_selector("#btn-export-detalle", timeout=25000)
+                except Exception:
+                    captura(page, "00_cookie_rechazada")
+                    raise RuntimeError(
+                        "La cookie de sesión no sirvió (quedó en "
+                        f"{page.url}). Probablemente expiró: hay que "
+                        "regenerarla con scripts/capturar_cookie.py."
+                    )
+                captura(page, "05_reportes_ok_por_cookie")
+                _exportar(page, captura, downloaded_path, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir)
+            except Exception:
+                captura(page, "error_fatal")
+                raise
+            return page
+
+        with StealthySession(
+            headless=False,
+            real_chrome=True,
+            locale="es-CL",
+            timezone_id="America/Santiago",
+            # Sin solver: no hay captcha que resolver en este camino.
+            solve_cloudflare=False,
+            timeout=90000,
+            network_idle=False,
+        ) as session:
+            session.fetch(f"{BASE_URL}/", page_action=entrar_con_cookie)
+
+        if "path" not in downloaded_path:
+            raise RuntimeError("El flujo terminó sin descargar el archivo (vía cookie).")
+        return downloaded_path["path"]
+
+    # Fallback: login normal. `StealthySession` en vez de `StealthyFetcher.fetch`: hace falta poder
     # RE-FETCHEAR, porque el solver de Cloudflare corre una vez por fetch y
     # es lo único que alguna vez ganó el challenge desde esta IP.
     #
@@ -294,7 +356,13 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
         captura(page, "02_login_rechazado")
         raise RuntimeError(f"El login no llegó a index.php (quedó en {page.url}).")
     captura(page, "03_index_ok")
+    _exportar(page, captura, downloaded_path, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir)
 
+
+def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt.date, download_dir: Path) -> None:
+    """Todo lo que va DESPUÉS de tener sesión abierta: filtrar el rango y
+    bajar el Excel. Separado del login porque con `FRAX_SESSION_COOKIE` se
+    entra por cookie y no se pasa por el formulario en absoluto."""
     # Aviso de "cuenta con pago pendiente" — no está confirmado que
     # aparezca siempre, por eso timeout corto y sin bloquear el flujo.
     cerrar_impago = page.locator("#btnCerrarImpago")
