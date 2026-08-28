@@ -5,11 +5,17 @@ on:
     # Cada 2 horas, 11:00 a 19:00 Chile: 11,13,15,17,19 Chile = 15,17,19,21,23 UTC
     # (Chile continental es UTC-4 fijo, sin horario de verano.)
     #
-    # Re-test cada 1 min (2026-08-28 ~20:15 UTC) tras el commit 406369a que
-    # retocó los 8 workflows con schedule para forzar el re-registro del
-    # cron. Volver a "0 15,17,19,21,23 * * *" apenas se confirme que
-    # `schedule` dispara de nuevo.
-    - cron: "* * * * *"
+    # Cada 2 horas, 11:00 a 19:00 Chile: 11,13,15,17,19 Chile = 15,17,19,21,23 UTC
+    # (Chile continental es UTC-4 fijo, sin horario de verano.)
+    #
+    # `schedule` no dispara en esta cuenta (supervisionecrapp-tech, recién
+    # creada): probado cada 1 min dos veces (28/08 y 28/08 ~20:15 UTC tras
+    # el commit 406369a de "re-registro"), 10+ min cada vez, CERO triggers.
+    # No es un tema de este workflow ni de frecuencia — es un bloqueo de
+    # `schedule` a nivel de cuenta (probablemente medida anti-abuso de
+    # GitHub en cuentas nuevas). Pendiente: ticket a GitHub Support. Hasta
+    # que se resuelva, estos bots solo corren por workflow_dispatch manual.
+    - cron: "0 15,17,19,21,23 * * *"
   workflow_dispatch:
     inputs:
       fecha:
