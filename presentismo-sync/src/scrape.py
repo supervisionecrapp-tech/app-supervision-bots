@@ -170,6 +170,46 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
+def _conseguir_token(page, captura, *, vueltas: int = 6) -> bool:
+    """Espera el token y, si no llega, RECARGA la página y vuelve a probar.
+
+    Que Cloudflare emita el token es una lotería por carga de página, no un
+    bloqueo fijo. Se ve en los tiempos del solver de Scrapling:
+
+        run 33132206620 (éxito)   01:18:31 -> 01:20:01  = 90s   -> token
+        run 33132639265 (fallo)   01:23:21 -> 01:23:22  = 0.7s  -> nada
+        run 33132639265 (fallo)   01:26:17 -> 01:26:17  = 0.3s  -> nada
+
+    Cuando el solver tarda ~90s efectivamente resuelve el challenge; cuando
+    dice "solved" en menos de un segundo, no hizo nada. Como cada carga es
+    una tirada nueva, conviene recargar (~5s) en vez de dejar morir el
+    intento y relanzar el browser entero (~90s) desde `with_retries`. Es lo
+    mismo que hace una persona cuando el portal le tira "Verificación de
+    seguridad fallida": recargar e insistir.
+
+    Ojo: la recarga borra los campos, así que esto tiene que correr ANTES
+    de tipear usuario y clave.
+    """
+    for vuelta in range(1, vueltas + 1):
+        if _esperar_token(page, segundos=20):
+            print(f"Token de Turnstile obtenido en la vuelta {vuelta}/{vueltas}.")
+            return True
+
+        captura(page, f"01c_sin_token_vuelta{vuelta}")
+        # El click real solo tiene sentido si el widget escaló a modo
+        # interactivo; si pasa invisible, el token llega sin tocar nada.
+        _click_real_xdotool(page, captura)
+        if _esperar_token(page, segundos=20):
+            print(f"Token obtenido tras el click real, vuelta {vuelta}/{vueltas}.")
+            return True
+
+        if vuelta < vueltas:
+            print(f"Sin token en la vuelta {vuelta}/{vueltas}; recargando login.php...")
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_selector("#usuario", timeout=30000)
+    return False
+
+
 def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path) -> Path:
     """Loguea, filtra el rango de fechas y descarga el Excel de "Detalle de
     marcas". `fecha_ff` es la fecha que queda en el campo "hasta" (se deja
@@ -250,6 +290,16 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     page.wait_for_selector("#usuario", timeout=30000)
     captura(page, "01_login_page")
 
+    # PRIMERO el token, DESPUÉS las credenciales: si hay que recargar para
+    # volver a tirar los dados (ver `_conseguir_token`), la recarga borra
+    # lo que se haya tipeado, así que tipear antes es tirar trabajo.
+    if not _conseguir_token(page, captura):
+        captura(page, "02_sin_token_turnstile")
+        raise RuntimeError(
+            "Turnstile no entregó token en ninguna de las recargas. "
+            "Reintento con browser nuevo vía with_retries."
+        )
+
     # El formulario trae un campo señuelo (#usuario_v2 — 0x0 vía CSS
     # pero no display:none, autocomplete="username") además del real
     # (#usuario, autocomplete="organization"): un honeypot anti-bot
@@ -257,26 +307,6 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # específico, nunca lo tocamos, igual que un usuario real.
     _tipear(page, "#usuario", frax_user)
     _tipear(page, "#clave", frax_pass)
-
-    # Gate obligatorio: nunca clickear "Entrar" sin token de Turnstile.
-    # Tipear arriba ya consume ~8s, que se suman a esta espera.
-    #
-    # Ya no clickeamos nosotros el checkbox. Sobre el pantallazo
-    # 232920_02_sin_token_turnstile del run 33126259380 se midió que el
-    # click caía DENTRO del checkbox (offset CSS ~27,26 sobre un checkbox
-    # que va de 11 a 31 en x y de 19 a 39 en y) y aun así Turnstile lo
-    # ignoraba: el evento sintético se está detectando, así que insistir
-    # solo sumaba señal de bot. Si el widget escala a interactivo, el que
-    # tiene que resolverlo es el solver de Scrapling, no nosotros.
-    if not _esperar_token(page, segundos=25):
-        captura(page, "01c_sin_token_antes_del_click")
-        _click_real_xdotool(page, captura)
-        if not _esperar_token(page, segundos=45):
-            captura(page, "02_sin_token_turnstile")
-            raise RuntimeError(
-                "Turnstile no entregó token ni tras el click real de xdotool. "
-                "Reintento con browser nuevo vía with_retries."
-            )
 
     captura(page, "01b_campos_llenos_con_token")
     page.click("button.btn-login")
