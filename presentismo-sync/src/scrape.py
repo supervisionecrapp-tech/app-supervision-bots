@@ -3,7 +3,7 @@
 Puerto a Python/Scrapling del bot Node/Playwright que existió hasta
 2026-08-21 (ver git log de este repo: "Eliminar presentismo-sync").
 
-Usa `StealthyFetcher` de Scrapling (Chromium/Chrome vía Patchright, NO
+Usa `StealthySession` de Scrapling (Chromium/Chrome vía Patchright, NO
 Camoufox pese a lo que decía una versión vieja de este comentario —
 confirmado leyendo el código fuente instalado de scrapling 0.4.15) con
 `solve_cloudflare=True`. Ese solver SÍ resuelve el Turnstile embebido de
@@ -44,7 +44,7 @@ import time
 from pathlib import Path
 from random import randint, uniform
 
-from scrapling.fetchers import StealthyFetcher
+from scrapling.fetchers import StealthySession
 
 BASE_URL = "https://www.controltienda.com/proveedor_server"
 
@@ -170,46 +170,6 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
-def _conseguir_token(page, captura, *, vueltas: int = 6) -> bool:
-    """Espera el token y, si no llega, RECARGA la página y vuelve a probar.
-
-    Que Cloudflare emita el token es una lotería por carga de página, no un
-    bloqueo fijo. Se ve en los tiempos del solver de Scrapling:
-
-        run 33132206620 (éxito)   01:18:31 -> 01:20:01  = 90s   -> token
-        run 33132639265 (fallo)   01:23:21 -> 01:23:22  = 0.7s  -> nada
-        run 33132639265 (fallo)   01:26:17 -> 01:26:17  = 0.3s  -> nada
-
-    Cuando el solver tarda ~90s efectivamente resuelve el challenge; cuando
-    dice "solved" en menos de un segundo, no hizo nada. Como cada carga es
-    una tirada nueva, conviene recargar (~5s) en vez de dejar morir el
-    intento y relanzar el browser entero (~90s) desde `with_retries`. Es lo
-    mismo que hace una persona cuando el portal le tira "Verificación de
-    seguridad fallida": recargar e insistir.
-
-    Ojo: la recarga borra los campos, así que esto tiene que correr ANTES
-    de tipear usuario y clave.
-    """
-    for vuelta in range(1, vueltas + 1):
-        if _esperar_token(page, segundos=20):
-            print(f"Token de Turnstile obtenido en la vuelta {vuelta}/{vueltas}.")
-            return True
-
-        captura(page, f"01c_sin_token_vuelta{vuelta}")
-        # El click real solo tiene sentido si el widget escaló a modo
-        # interactivo; si pasa invisible, el token llega sin tocar nada.
-        _click_real_xdotool(page, captura)
-        if _esperar_token(page, segundos=20):
-            print(f"Token obtenido tras el click real, vuelta {vuelta}/{vueltas}.")
-            return True
-
-        if vuelta < vueltas:
-            print(f"Sin token en la vuelta {vuelta}/{vueltas}; recargando login.php...")
-            page.reload(wait_until="domcontentloaded")
-            page.wait_for_selector("#usuario", timeout=30000)
-    return False
-
-
 def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path) -> Path:
     """Loguea, filtra el rango de fechas y descarga el Excel de "Detalle de
     marcas". `fecha_ff` es la fecha que queda en el campo "hasta" (se deja
@@ -237,21 +197,40 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     downloaded_path: dict[str, Path] = {}
 
     def interactuar(page):
+        """Corre en cada `session.fetch()`. Si esta tirada no trajo token,
+        devuelve sin hacer nada y el bucle vuelve a fetchear."""
         try:
+            page.wait_for_selector("#usuario", timeout=30000)
+            captura(page, "01_login_page")
+            if not _esperar_token(page, segundos=25):
+                captura(page, "01c_sin_token")
+                # Solo tiene sentido si el widget escaló a interactivo; si
+                # pasa invisible, el token llega sin tocar nada.
+                _click_real_xdotool(page, captura)
+                if not _esperar_token(page, segundos=20):
+                    print("Esta tirada no trajo token; se vuelve a fetchear con el solver.")
+                    return page
             _interactuar_paso(page, captura, downloaded_path, frax_user=frax_user, frax_pass=frax_pass, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir)
         except Exception:
             captura(page, "error_fatal")
             raise
         return page
 
-    StealthyFetcher.fetch(
-        f"{BASE_URL}/login.php",
+    # `StealthySession` en vez de `StealthyFetcher.fetch`: hace falta poder
+    # RE-FETCHEAR, porque el solver de Cloudflare corre una vez por fetch y
+    # es lo único que alguna vez ganó el challenge desde esta IP.
+    #
+    # El run 33133022451 lo dejó claro: recargar con `page.reload()` 12
+    # veces no trajo ni un token, porque la recarga no vuelve a invocar al
+    # solver. En cambio en el run 33132206620 el solver tardó 90s, resolvió
+    # de verdad, y la corrida terminó bien (325 marcaciones). Con la sesión
+    # abierta cada `fetch` es una tirada nueva CON solver, reusando el mismo
+    # browser (y sus cookies de Cloudflare) en vez de relanzarlo.
+    with StealthySession(
         # Headful bajo xvfb (ver el workflow) en vez de headless: Cloudflare
-        # detecta Chrome headless con bastante fiabilidad, y es la palanca
-        # más grande que nos queda sin meter plata (proxy residencial).
+        # detecta Chrome headless con bastante fiabilidad.
         headless=False,
-        # Chrome real instalado en el runner en vez del Chromium embebido:
-        # otra huella distinta.
+        # Chrome real del runner en vez del Chromium embebido: otra huella.
         real_chrome=True,
         # El runner corre en UTC. Un browser que dice ser Chrome de un
         # usuario chileno pero reporta timezone UTC es un mismatch que
@@ -260,18 +239,20 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
         locale="es-CL",
         timezone_id="America/Santiago",
         solve_cloudflare=True,
-        # La doc de StealthyFetcher pide timeout >= 60s cuando el solver
-        # de Cloudflare está activo ("The timeout should be at least 60
-        # seconds when using the Cloudflare solver"). El default de 30s
-        # dejaba al solver sin margen.
-        timeout=90000,
-        # Los waits explícitos de arriba (wait_for_url/wait_for_selector/
-        # wait_for_timeout) ya cubren cada paso — esperar además a
+        # La doc de StealthyFetcher pide timeout >= 60s con el solver activo.
+        # Se le da más margen todavía: la tirada que ganó necesitó 90s.
+        timeout=150000,
+        # Los waits explícitos ya cubren cada paso — esperar además a
         # "networkidle" en cada navegación solo suma tiempo muerto
         # (trackers/pixels de terceros que nunca terminan de cargar).
         network_idle=False,
-        page_action=interactuar,
-    )
+    ) as session:
+        for vuelta in range(1, 7):
+            print(f"--- Tirada {vuelta}/6 (fetch con solver de Cloudflare) ---")
+            session.fetch(f"{BASE_URL}/login.php", page_action=interactuar)
+            if "path" in downloaded_path:
+                print(f"Listo en la tirada {vuelta}.")
+                break
 
     if "path" not in downloaded_path:
         raise RuntimeError("El flujo terminó sin descargar el archivo (page_action no llegó a exportar).")
@@ -287,19 +268,9 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # segundo después el pantallazo del goto que había acá (21:41:04):
     # esa recarga desmontaba el widget ya resuelto y volvía a arrancar un
     # Turnstile virgen, tirando el token a la basura.
-    page.wait_for_selector("#usuario", timeout=30000)
-    captura(page, "01_login_page")
-
-    # PRIMERO el token, DESPUÉS las credenciales: si hay que recargar para
-    # volver a tirar los dados (ver `_conseguir_token`), la recarga borra
-    # lo que se haya tipeado, así que tipear antes es tirar trabajo.
-    if not _conseguir_token(page, captura):
-        captura(page, "02_sin_token_turnstile")
-        raise RuntimeError(
-            "Turnstile no entregó token en ninguna de las recargas. "
-            "Reintento con browser nuevo vía with_retries."
-        )
-
+    # Acá ya hay token: el chequeo y las re-tiradas las hace `interactuar`
+    # en `scrape_presentismo_export`, antes de llamar a esta función.
+    #
     # El formulario trae un campo señuelo (#usuario_v2 — 0x0 vía CSS
     # pero no display:none, autocomplete="username") además del real
     # (#usuario, autocomplete="organization"): un honeypot anti-bot
