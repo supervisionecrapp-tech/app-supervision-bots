@@ -14,6 +14,25 @@ from upload import upload_presentismo_file
 SANTIAGO = ZoneInfo("America/Santiago")
 
 
+def cargar_env_local() -> None:
+    """Carga `presentismo-sync/.env.local` si existe (formato KEY=valor).
+
+    Solo para correr el bot a mano desde una máquina de confianza: en
+    GitHub Actions las credenciales llegan por `secrets` y el archivo no
+    existe. Lo de arriba nunca pisa lo que ya venga en el entorno, así
+    que en CI es un no-op. Parser propio a propósito, para no sumar
+    python-dotenv como dependencia por 8 líneas."""
+    env_file = Path(__file__).resolve().parent.parent / ".env.local"
+    if not env_file.is_file():
+        return
+    for linea in env_file.read_text(encoding="utf-8").splitlines():
+        linea = linea.strip()
+        if not linea or linea.startswith("#") or "=" not in linea:
+            continue
+        clave, _, valor = linea.partition("=")
+        os.environ.setdefault(clave.strip(), valor.strip().strip('"').strip("'"))
+
+
 def require_env(name: str) -> str:
     v = os.environ.get(name)
     if not v:
@@ -83,6 +102,7 @@ def log_run(supabase, *, fecha_iso: str, started_at: str, status: str, error_mes
 
 
 def main() -> None:
+    cargar_env_local()
     fecha = read_fecha()
     frax_user = require_env("FRAX_USER")
     frax_pass = require_env("FRAX_PASS")

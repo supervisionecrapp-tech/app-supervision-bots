@@ -18,7 +18,15 @@ on:
 
 jobs:
   run:
-    runs-on: ubuntu-latest
+    # Se elige por variable de repo (Settings > Variables > PRESENTISMO_RUNNER)
+    # para poder mover el bot a un runner propio SIN tocar el código.
+    #
+    # Por qué importa: medido el 27/08, en el Chrome real del usuario y desde
+    # su IP, Turnstile emite el token solo, invisible, en menos de 8s
+    # (`tokenLen: 773`). Desde los runners de GitHub (rangos de Azure) no lo
+    # emite nunca — ni headless, ni headful con Chrome real y locale es-CL.
+    # La diferencia es la reputación de la IP, no el código.
+    runs-on: ${{ vars.PRESENTISMO_RUNNER || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: presentismo-sync
@@ -36,10 +44,11 @@ jobs:
       - run: scrapling install
 
       # El scrape corre HEADFUL (headless=False) porque Cloudflare detecta
-      # Chrome headless: sin display real no arranca, así que xvfb le da uno
-      # virtual. Viene en la imagen de ubuntu-latest, pero lo instalamos
-      # explícito para no depender de eso.
-      - run: sudo apt-get install -y xvfb
+      # Chrome headless. En Linux eso necesita un display: xvfb se lo da
+      # virtual. En un runner propio de Windows/macOS ya hay uno real.
+      - name: Instalar xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y xvfb
 
       - name: Sync
         env:
@@ -47,8 +56,13 @@ jobs:
           FRAX_PASS: ${{ secrets.FRAX_PASS }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FECHA: ${{ github.event.inputs.fecha }}
-        # xvfb-run -a: display virtual para el browser headful.
-        run: xvfb-run -a python src/sync.py
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python src/sync.py
+          else
+            python src/sync.py
+          fi
 
       # Pantallazos de cada paso del flujo (login, index, reportes, export),
       # más uno extra si el flujo tira excepción — para diagnosticar en qué
