@@ -5,14 +5,13 @@ on:
     # Cada 2 horas, 11:00 a 19:00 Chile: 11,13,15,17,19 Chile = 15,17,19,21,23 UTC
     # (Chile continental es UTC-4 fijo, sin horario de verano.)
     #
-    # TEMPORAL — cada 1 minuto (el mínimo que soporta cron; GitHub Actions
-    # no tiene resolución de segundos), a pedido explícito del usuario para
-    # revisar más rápido si el schedule nativo volvió a andar. Ya se probó
-    # cada 3 minutos el 28/08/2026 sin resultado — esto es solo más
-    # densidad de intentos, no una causa distinta. Revertir a la línea de
-    # abajo apenas se confirme un run con event=schedule.
-    - cron: "* * * * *"
-    # - cron: "0 15,17,19,21,23 * * *"  # real: cada 2 horas, 11-19 Chile — restaurar esto
+    # Se probó cada 3 min y luego cada 1 min (el mínimo posible de cron) el
+    # 28/08/2026 para diagnosticar el bloqueo de `schedule` en la cuenta
+    # supervisionecrapp-tech (recién creada). Con 1 min, 5+ oportunidades en
+    # 5 minutos y CERO triggers — descarta que sea un tema de frecuencia o
+    # de "primer disparo tarda"; el bloqueo es real y no es de este
+    # workflow en particular. Sigue pendiente: ticket a GitHub Support.
+    - cron: "0 15,17,19,21,23 * * *"
   workflow_dispatch:
     inputs:
       fecha:
