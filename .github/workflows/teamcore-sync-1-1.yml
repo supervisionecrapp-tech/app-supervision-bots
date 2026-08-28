@@ -1,21 +1,16 @@
-name: Teamcore Sync
+name: Teamcore Sync 1.1
 
 on:
   schedule:
-    # Cada 2 horas, 11:00 a 19:00 Chile: 11,13,15,17,19 Chile = 15,17,19,21,23 UTC
-    # (Chile continental es UTC-4 fijo, sin horario de verano.)
+    # Workflow "1.1": archivo nuevo (no un rename) para que GitHub lo trate
+    # como una automatización recién creada, después de activar 2FA en la
+    # cuenta supervisionecrapp-tech — a ver si así deja de bloquear
+    # `schedule`. El "Teamcore Sync" viejo (sin 1.1) queda eliminado.
     #
-    # Cada 2 horas, 11:00 a 19:00 Chile: 11,13,15,17,19 Chile = 15,17,19,21,23 UTC
-    # (Chile continental es UTC-4 fijo, sin horario de verano.)
-    #
-    # `schedule` no dispara en esta cuenta (supervisionecrapp-tech, recién
-    # creada): probado cada 1 min dos veces (28/08 y 28/08 ~20:15 UTC tras
-    # el commit 406369a de "re-registro"), 10+ min cada vez, CERO triggers.
-    # No es un tema de este workflow ni de frecuencia — es un bloqueo de
-    # `schedule` a nivel de cuenta (probablemente medida anti-abuso de
-    # GitHub en cuentas nuevas). Pendiente: ticket a GitHub Support. Hasta
-    # que se resuelva, estos bots solo corren por workflow_dispatch manual.
-    - cron: "0 15,17,19,21,23 * * *"
+    # Cada 1 min desde ~16:30 Chile (20:30 UTC) del 28/08/2026 en adelante,
+    # para confirmar cuanto antes si dispara solo. Volver al horario normal
+    # (11,13,15,17,19 Chile = 15,17,19,21,23 UTC) apenas se confirme.
+    - cron: "* * * * *"
   workflow_dispatch:
     inputs:
       fecha:

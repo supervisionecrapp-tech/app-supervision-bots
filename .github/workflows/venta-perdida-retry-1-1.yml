@@ -1,4 +1,4 @@
-name: Venta Perdida Sync — Retry
+name: Venta Perdida Sync — Retry 1.1
 
 on:
   schedule:
