@@ -2,9 +2,9 @@ name: DEC Documentos Sync
 
 on:
   schedule:
-    # Una vez al dia, 12:00 Chile = 16:00 UTC
+    # Dos veces al dia, 12:00 y 15:00 Chile = 16:00 y 19:00 UTC
     # (Chile continental es UTC-4 fijo, sin horario de verano.)
-    - cron: "0 16 * * *"
+    - cron: "0 16,19 * * *"
   workflow_dispatch: {}
 
 jobs:
