@@ -11,6 +11,7 @@ on:
     # cuentas nuevas hasta verificar algo, todavía sin identificar qué
     # exactamente). 8 minutos a cada 3 min sin un solo trigger confirmó el
     # bloqueo; no era un problema de este workflow en particular.
+    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
     - cron: "0 15,17,19,21,23 * * *"
   workflow_dispatch:
     inputs:

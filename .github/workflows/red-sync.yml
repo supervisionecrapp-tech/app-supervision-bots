@@ -9,6 +9,7 @@ on:
     # America/Santiago = 15:00 UTC (Chile continental tiene hora única
     # todo el año, sin horario de verano — si eso cambia, ajustar este
     # offset).
+    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
     - cron: "0 15 * * 1,2,3,5"
   workflow_dispatch:
     inputs:

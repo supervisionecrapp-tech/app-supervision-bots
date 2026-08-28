@@ -6,6 +6,7 @@ on:
     # "request", para darle margen a la cola intermitente del portal
     # (~45 min según lo observado, a veces más). Adentro además reintenta
     # con su propio timeout de polling, así que el margen real es mayor.
+    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
     - cron: "0 14 * * 1,3,5"
   workflow_dispatch:
 

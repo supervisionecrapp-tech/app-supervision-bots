@@ -13,6 +13,7 @@ on:
     # cookie cada corrida exitosa tarda ~1-2 min (sin login, sin esperar al
     # solver de Turnstile), muy por debajo de los ~1.820 min/mes que
     # consumían las 18 corridas/día de la época con login normal.
+    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
     - cron: "0 14,16,18,20 * * *"
   workflow_dispatch:
     inputs:

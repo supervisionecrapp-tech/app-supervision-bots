@@ -4,6 +4,7 @@ on:
   schedule:
     # Cada 2 horas, 10:00 a 16:00 Chile: 10,12,14,16 Chile = 14,16,18,20 UTC
     # (Chile continental es UTC-4 fijo, sin horario de verano.)
+    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
     - cron: "0 14,16,18,20 * * *"
   workflow_dispatch:
     inputs:
