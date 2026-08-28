@@ -2,12 +2,14 @@ name: Red Sync
 
 on:
   schedule:
-    # TODOS los días a las 11:00 America/Santiago = 15:00 UTC (Chile
-    # continental tiene hora única todo el año, sin horario de verano —
-    # si eso cambia, ajustar este offset). Los martes, además, se sigue
-    # recargando la semana anterior completa (ver el paso "Sync Red —
-    # semana anterior" más abajo, sigue detectando martes por su cuenta).
-    - cron: "0 15 * * *"
+    # Lunes/miércoles/viernes (mismos días que venta-perdida-*.yml, a
+    # pedido explícito del usuario) + martes (para no perder la recarga de
+    # la semana anterior — ver el paso "Sync Red — semana anterior" más
+    # abajo, que sigue detectando martes por su cuenta). 11:00
+    # America/Santiago = 15:00 UTC (Chile continental tiene hora única
+    # todo el año, sin horario de verano — si eso cambia, ajustar este
+    # offset).
+    - cron: "0 15 * * 1,2,3,5"
   workflow_dispatch:
     inputs:
       categoria:
