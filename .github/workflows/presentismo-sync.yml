@@ -2,13 +2,24 @@ name: Presentismo Sync
 
 on:
   schedule:
-    # Cada 1 hora, 6:00 a 23:00 Chile (Chile continental es UTC-4 fijo,
+    # Cada 3 horas, 7:30 a 22:30 Chile (Chile continental es UTC-4 fijo,
     # sin horario de verano — mismo criterio que asistencia-sync.yml):
-    # 6-23 Chile = 10-23,0-3 UTC. "desde" en el portal siempre es el día
-    # anterior a "hasta" (hoy), así que cada corrida vuelve a traer el
-    # rango completo; el upsert (rut_persona, local_code, entrada) hace
-    # que las marcaciones repetidas de corridas anteriores no dupliquen.
-    - cron: "0 10-23,0-3 * * *"
+    # 7,10,13,16,19,22 Chile = 11,14,17,20,23,2 UTC. "desde" en el portal
+    # siempre es el día anterior a "hasta" (hoy), así que cada corrida
+    # vuelve a traer el rango completo; el upsert (rut_persona, local_code,
+    # entrada) hace que las marcaciones repetidas de corridas anteriores no
+    # dupliquen — espaciar no pierde marcaciones, solo las muestra mas tarde.
+    #
+    # Bajado de 1 hora a 3 horas (18 -> 6 corridas diarias) por dos razones:
+    #  1. Es el bot mas caro del repo. A 18/dia consumia ~1.820 min/mes de
+    #     los 2.000 de Actions el solo.
+    #  2. Hace segura la caida al fallback. Si el runner propio esta abajo,
+    #     `runs-on` cae en ubuntu-latest: a 18/dia eso reventaba el
+    #     presupuesto en silencio; a 6/dia son ~360 min/mes, absorbible.
+    #
+    # Minuto :30 a proposito, para no competir con asistencia-sync.yml y
+    # smu-presentismo-sync.yml, que corren en el minuto :00 de esas horas.
+    - cron: "30 11,14,17,20,23,2 * * *"
   workflow_dispatch:
     inputs:
       fecha:
@@ -27,6 +38,7 @@ jobs:
     # emite nunca — ni headless, ni headful con Chrome real y locale es-CL.
     # La diferencia es la reputación de la IP, no el código.
     runs-on: ${{ vars.PRESENTISMO_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: presentismo-sync

@@ -10,6 +10,7 @@ on:
 jobs:
   notificar:
     runs-on: ubuntu-latest
+    timeout-minutes: 6
     defaults:
       run:
         working-directory: notificaciones-sync

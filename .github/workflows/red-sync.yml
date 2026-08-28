@@ -32,6 +32,7 @@ jobs:
   # paralelo.
   setup:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     outputs:
       categorias: ${{ steps.set.outputs.categorias }}
     steps:
@@ -46,6 +47,7 @@ jobs:
   sync:
     needs: setup
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:

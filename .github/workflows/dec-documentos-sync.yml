@@ -2,17 +2,19 @@ name: DEC Documentos Sync
 
 on:
   schedule:
-    # Cada 1 hora, 6:00 a 23:00 Chile — mismo patrón y mismo horario que
-    # presentismo-sync.yml/smu-presentismo-sync.yml (a pedido explícito:
-    # "deja la corrida al igual que presentismo cada 1 hora"). Chile
-    # continental es UTC-4 fijo (sin horario de verano, mismo criterio que
-    # el resto de los bots): 6-23 Chile = 10-23,0-3 UTC.
-    - cron: "0 10-23,0-3 * * *"
+    # Cada 5 horas, 7:00 a 22:00 Chile: 7,12,17,22 Chile = 11,16,21,2 UTC
+    # (Chile continental es UTC-4 fijo, sin horario de verano — mismo
+    # criterio que el resto de los bots). Bajado de 1 hora a 5 horas
+    # (18 -> 4 corridas diarias): era el bot mas caro del repo
+    # (~1.370 min/mes de los 2.000 disponibles) y los documentos
+    # pendientes de firma no cambian con cadencia horaria.
+    - cron: "0 11,16,21,2 * * *"
   workflow_dispatch: {}
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     defaults:
       run:
         working-directory: dec-documentos-sync

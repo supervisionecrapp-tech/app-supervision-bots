@@ -9,7 +9,7 @@ se consigue — de ahí que exista este camino.
 Lee FRAX_USER y FRAX_PASS de .env.local. Imprime el valor de PHPSESSID,
 que hay que guardar como secret del repo:
 
-    gh secret set FRAX_SESSION_COOKIE --repo StarCrushed/app-supervision-bots
+    gh secret set FRAX_SESSION_COOKIE --repo <owner>/app-supervision-bots
 
 Mientras ese secret esté puesto, el bot entra directo a /reportes/ y no
 toca el formulario de login. Si la sesión expira, el bot falla con un
@@ -19,10 +19,30 @@ mensaje claro y hay que volver a correr esto.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
 BOT = Path(__file__).resolve().parent.parent
+
+
+def repo_actual() -> str:
+    """owner/repo deducido del remote git, para no hardcodear la cuenta.
+
+    El repo se migro de una cuenta personal a la cuenta de la app; dejarlo
+    fijo en el codigo obliga a editar este script en cada mudanza.
+    """
+    import subprocess
+
+    try:
+        url = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=BOT, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "<owner>/app-supervision-bots"
+    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
+    return m.group(1) if m else "<owner>/app-supervision-bots"
 sys.path.insert(0, str(BOT / "src"))
 
 from scrapling.fetchers import StealthySession  # noqa: E402
@@ -80,7 +100,7 @@ def main() -> None:
 
     print("\nPHPSESSID capturado. Guardalo como secret del repo:\n")
     print(f"  {capturado['phpsessid']}\n")
-    print("  gh secret set FRAX_SESSION_COOKIE --repo StarCrushed/app-supervision-bots")
+    print(f"  gh secret set FRAX_SESSION_COOKIE --repo {repo_actual()}")
 
 
 if __name__ == "__main__":

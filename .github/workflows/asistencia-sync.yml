@@ -2,10 +2,14 @@ name: Asistencia Sync
 
 on:
   schedule:
-    # Sync horario, 7:00 a 23:00 America/Santiago (Chile continental es
-    # UTC-4 fijo, sin horario de verano — mismo criterio que
-    # red-sync.yml/teamcore-sync.yml): 7-23 Chile = 11-23,0-3 UTC.
-    - cron: "0 11-23,0-3 * * *"
+    # Sync cada 3 horas, 7:00 a 22:00 America/Santiago (Chile continental
+    # es UTC-4 fijo, sin horario de verano — mismo criterio que
+    # red-sync.yml/teamcore-sync.yml): 7,10,13,16,19,22 Chile =
+    # 11,14,17,20,23,2 UTC. Bajado de 1 hora a 3 horas (17 -> 6 corridas
+    # diarias) para caber en los 2.000 min/mes de Actions; la API de
+    # GeoVictoria devuelve el rango completo en cada corrida, asi que
+    # espaciar no pierde marcaciones, solo las muestra mas tarde.
+    - cron: "0 11,14,17,20,23,2 * * *"
     # Reset diario, 3:00 AM Chile = 07:00 UTC.
     - cron: "0 7 * * *"
     # Roster de colaboradores (Turnos Extras) diario, 6:00 AM Chile = 10:00 UTC
@@ -24,6 +28,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     defaults:
       run:
         working-directory: asistencia-sync

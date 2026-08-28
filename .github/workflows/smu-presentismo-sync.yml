@@ -2,12 +2,13 @@ name: SMU Presentismo Sync
 
 on:
   schedule:
-    # Mismo horario que presentismo-sync.yml (Presentismo WM): cada 1 hora,
-    # 6:00 a 23:00 America/Santiago (Chile continental sin horario de
-    # verano): 6-23 Chile = 10-23,0-3 UTC. El upsert por (rut, local_code,
+    # Cada 3 horas, 6:00 a 21:00 America/Santiago (Chile continental sin
+    # horario de verano): 6,9,12,15,18,21 Chile = 10,13,16,19,22,1 UTC.
+    # Bajado de 1 hora a 3 horas (18 -> 6 corridas diarias) por el
+    # presupuesto de minutos de Actions. El upsert por (rut, local_code,
     # fecha, acceso, ocurrencia) hace que las filas repetidas de corridas
-    # anteriores no dupliquen.
-    - cron: "0 10-23,0-3 * * *"
+    # anteriores no dupliquen, asi que espaciar no pierde accesos.
+    - cron: "0 10,13,16,19,22,1 * * *"
   workflow_dispatch:
     inputs:
       fecha:
@@ -17,6 +18,7 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     defaults:
       run:
         working-directory: smu-presentismo-sync
