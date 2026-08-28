@@ -116,10 +116,19 @@ def main() -> None:
     print(f"Sincronizando Presentismo (marcaciones) — hasta {fecha_iso} (desde el día anterior)")
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
 
+    # bot_config es el mismo lugar que lee/actualiza presentismo-keepalive
+    # (Edge Function en Supabase, cada 10 min) para mantener la sesión viva.
+    # Un solo lugar en vez de un secret de GitHub duplicado.
+    cookie_row = (
+        supabase.table("bot_config").select("value").eq("key", "frax_session_cookie").maybe_single().execute()
+    )
+    session_cookie = (cookie_row.data or {}).get("value") if cookie_row else None
+
     try:
         def intentar():
             file_path = scrape_presentismo_export(
-                fecha_ff=fecha, frax_user=frax_user, frax_pass=frax_pass, download_dir=download_dir
+                fecha_ff=fecha, frax_user=frax_user, frax_pass=frax_pass, download_dir=download_dir,
+                session_cookie=session_cookie,
             )
             print(f"Archivo descargado: {file_path}")
             return upload_presentismo_file(

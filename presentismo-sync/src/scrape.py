@@ -171,12 +171,15 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
-def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path) -> Path:
+def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None) -> Path:
     """Loguea, filtra el rango de fechas y descarga el Excel de "Detalle de
     marcas". `fecha_ff` es la fecha que queda en el campo "hasta" (se deja
     tal cual la trae el portal si no se toca; acá se pasa explícita para
     que quede logueada). El campo "desde" siempre es el día anterior a
-    `fecha_ff`, a pedido explícito del usuario."""
+    `fecha_ff`, a pedido explícito del usuario.
+
+    `session_cookie`: si se pasa (viene de `bot_config` en Supabase, ver
+    `sync.py`), se entra por sesión ya abierta y no se toca el login."""
     download_dir.mkdir(parents=True, exist_ok=True)
     fecha_fi = fecha_ff - dt.timedelta(days=1)
 
@@ -226,10 +229,13 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     # intentos), esta es la vía que no depende de ganarle a Cloudflare.
     #
     # La cookie se saca corriendo `scripts/capturar_cookie.py` desde una
-    # máquina de confianza y se guarda como secret FRAX_SESSION_COOKIE.
-    cookie_sesion = (os.environ.get("FRAX_SESSION_COOKIE") or "").strip()
+    # máquina de confianza, que la guarda en bot_config (Supabase) — mismo
+    # lugar que lee la Edge Function presentismo-keepalive para mantenerla
+    # viva. Un solo lugar, para no tener la cookie duplicada y potencialmente
+    # desincronizada entre un secret de GitHub y Supabase.
+    cookie_sesion = (session_cookie or "").strip()
     if cookie_sesion:
-        print("Hay FRAX_SESSION_COOKIE: se entra por cookie, sin pasar por el login.")
+        print("Hay cookie de sesión en bot_config: se entra por cookie, sin pasar por el login.")
 
         def entrar_con_cookie(page):
             try:
