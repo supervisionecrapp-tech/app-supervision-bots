@@ -46,9 +46,11 @@ jobs:
       # El scrape corre HEADFUL (headless=False) porque Cloudflare detecta
       # Chrome headless. En Linux eso necesita un display: xvfb se lo da
       # virtual. En un runner propio de Windows/macOS ya hay uno real.
-      - name: Instalar xvfb
+      # xdotool: para clickear el checkbox de Turnstile con un click real
+      # del servidor X en vez de uno por CDP, que Turnstile ignora.
+      - name: Instalar xvfb y xdotool
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y xvfb
+        run: sudo apt-get install -y xvfb xdotool
 
       - name: Sync
         env:

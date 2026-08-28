@@ -38,8 +38,11 @@ Selectores DOM confirmados contra el portal real en la versión anterior
 from __future__ import annotations
 
 import datetime as dt
+import shutil
+import subprocess
+import time
 from pathlib import Path
-from random import randint
+from random import randint, uniform
 
 from scrapling.fetchers import StealthyFetcher
 
@@ -86,6 +89,69 @@ def _esperar_token(page, *, segundos: int = 20) -> bool:
             return True
         page.wait_for_timeout(500)
     return False
+
+
+def _click_real_xdotool(page, captura) -> bool:
+    """Clickea el checkbox de Turnstile con un click REAL del servidor X.
+
+    `page.mouse.click()` viaja por CDP (`Input.dispatchMouseEvent`).
+    Medido sobre el pantallazo 232920 del run 33126259380, ese click caía
+    DENTRO del checkbox y Turnstile lo ignoraba igual: el evento sintético
+    se detecta. `xdotool` mueve el puntero real del display virtual que
+    levanta xvfb — es lo mismo que hace SeleniumBase en su
+    `uc_gui_click_captcha()` para este caso.
+
+    Devuelve False si no hay xdotool o si no se pudo ubicar el widget.
+    """
+    if not shutil.which("xdotool"):
+        print("xdotool no está instalado; se omite el click real.")
+        return False
+
+    # No se puede entrar al iframe: Turnstile lo monta en un shadow root
+    # (confirmado en vivo el 27/08 contra el portal — `.shadowRoot` da
+    # null desde el page context). Se usa la caja del div contenedor, que
+    # sí se ve desde el DOM normal, más el offset del checkbox medido
+    # sobre pantallazos reales: va pegado al borde izquierdo, ~30px
+    # adentro, y centrado en la altura del widget.
+    coords = page.evaluate(
+        """() => {
+            const div = document.querySelector('.cf-turnstile');
+            if (!div) return null;
+            const r = div.getBoundingClientRect();
+            if (!r.width || !r.height) return null;
+            return {
+                x: window.screenX + r.x,
+                y: window.screenY + (window.outerHeight - window.innerHeight) + r.y,
+                w: r.width,
+                h: r.height,
+            };
+        }"""
+    )
+    if not coords:
+        return False
+
+    destino_x = int(coords["x"]) + randint(28, 33)
+    destino_y = int(coords["y"]) + int(coords["h"] * 0.45)
+
+    # Acercarse en tramos y frenar antes de clickear, en vez de
+    # teletransportar el puntero: un salto instantáneo seguido de click
+    # inmediato es de las señales más baratas de detectar.
+    for paso in (0.45, 0.8):
+        subprocess.run(
+            [
+                "xdotool", "mousemove",
+                str(destino_x - int((1 - paso) * randint(60, 140))),
+                str(destino_y - int((1 - paso) * randint(40, 90))),
+            ],
+            check=False,
+        )
+        time.sleep(uniform(0.12, 0.28))
+
+    subprocess.run(["xdotool", "mousemove", str(destino_x), str(destino_y)], check=False)
+    time.sleep(uniform(0.25, 0.5))
+    subprocess.run(["xdotool", "click", "1"], check=False)
+    captura(page, "01d_click_real_xdotool")
+    return True
 
 
 def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path) -> Path:
@@ -186,12 +252,15 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # ignoraba: el evento sintético se está detectando, así que insistir
     # solo sumaba señal de bot. Si el widget escala a interactivo, el que
     # tiene que resolverlo es el solver de Scrapling, no nosotros.
-    if not _esperar_token(page, segundos=60):
-        captura(page, "02_sin_token_turnstile")
-        raise RuntimeError(
-            "Turnstile no entregó token en 60s: Cloudflare no está dando el "
-            "pase a este browser/IP. Reintento con browser nuevo vía with_retries."
-        )
+    if not _esperar_token(page, segundos=25):
+        captura(page, "01c_sin_token_antes_del_click")
+        _click_real_xdotool(page, captura)
+        if not _esperar_token(page, segundos=45):
+            captura(page, "02_sin_token_turnstile")
+            raise RuntimeError(
+                "Turnstile no entregó token ni tras el click real de xdotool. "
+                "Reintento con browser nuevo vía with_retries."
+            )
 
     captura(page, "01b_campos_llenos_con_token")
     page.click("button.btn-login")
