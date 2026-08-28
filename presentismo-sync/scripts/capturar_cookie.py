@@ -20,6 +20,7 @@ volver a correr esto.
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import sys
 from pathlib import Path
@@ -86,8 +87,16 @@ def main() -> None:
         raise SystemExit("No se pudo loguear; volvé a intentar.")
 
     supabase = create_client(supabase_url, supabase_key)
+    # updated_at explícito: el default de la columna solo aplica en el
+    # INSERT inicial, no en cada UPDATE de un upsert — sin esto,
+    # updated_at quedaba pegado en la primera vez que se creó la fila y no
+    # servía para confirmar que una regeneración posterior sí escribió.
     supabase.table("bot_config").upsert(
-        {"key": "frax_session_cookie", "value": capturado["phpsessid"]}
+        {
+            "key": "frax_session_cookie",
+            "value": capturado["phpsessid"],
+            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }
     ).execute()
     print("Cookie guardada en Supabase (bot_config.frax_session_cookie). Listo.")
 
