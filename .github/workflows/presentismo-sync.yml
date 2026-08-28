@@ -61,7 +61,12 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a python src/sync.py
+            # -screen explícito: xvfb-run por defecto levanta 1280x1024,
+            # mientras el browser arranca --start-maximized creyendo tener
+            # 1920x1080. Con esa diferencia las coordenadas que calcula
+            # scrape.py para el click de xdotool caen fuera de la pantalla
+            # (run 33131225717: el checkbox quedó intacto tras el click).
+            xvfb-run -a --server-args="-screen 0 1920x1080x24" python src/sync.py
           else
             python src/sync.py
           fi

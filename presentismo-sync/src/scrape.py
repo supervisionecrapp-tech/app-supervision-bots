@@ -133,6 +133,21 @@ def _click_real_xdotool(page, captura) -> bool:
     destino_x = int(coords["x"]) + randint(28, 33)
     destino_y = int(coords["y"]) + int(coords["h"] * 0.45)
 
+    # Instrumentación: en el run 33131225717 el pantallazo posterior al
+    # click mostró el checkbox intacto — ni marcado ni con error — o sea
+    # que el click no llegó a la pantalla. Antes de seguir adivinando,
+    # dejamos registrado el tamaño real del display, la geometría que
+    # reporta el browser y dónde termina el puntero.
+    def _cmd(*args: str) -> str:
+        try:
+            return subprocess.run(args, capture_output=True, text=True, timeout=10).stdout.strip()
+        except Exception as err:  # noqa: BLE001
+            return f"(falló: {err})"
+
+    print(f"[xdotool] geometría del browser: {coords}")
+    print(f"[xdotool] display: {_cmd('xdotool', 'getdisplaygeometry')}")
+    print(f"[xdotool] destino calculado: {destino_x},{destino_y}")
+
     # Acercarse en tramos y frenar antes de clickear, en vez de
     # teletransportar el puntero: un salto instantáneo seguido de click
     # inmediato es de las señales más baratas de detectar.
@@ -149,6 +164,7 @@ def _click_real_xdotool(page, captura) -> bool:
 
     subprocess.run(["xdotool", "mousemove", str(destino_x), str(destino_y)], check=False)
     time.sleep(uniform(0.25, 0.5))
+    print(f"[xdotool] puntero quedó en: {_cmd('xdotool', 'getmouselocation')}")
     subprocess.run(["xdotool", "click", "1"], check=False)
     captura(page, "01d_click_real_xdotool")
     return True
