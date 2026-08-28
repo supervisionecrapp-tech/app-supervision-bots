@@ -5,13 +5,11 @@ on:
     # Cada 2 horas, 11:00 a 19:00 Chile: 11,13,15,17,19 Chile = 15,17,19,21,23 UTC
     # (Chile continental es UTC-4 fijo, sin horario de verano.)
     #
-    # Se probó cada 3 min y luego cada 1 min (el mínimo posible de cron) el
-    # 28/08/2026 para diagnosticar el bloqueo de `schedule` en la cuenta
-    # supervisionecrapp-tech (recién creada). Con 1 min, 5+ oportunidades en
-    # 5 minutos y CERO triggers — descarta que sea un tema de frecuencia o
-    # de "primer disparo tarda"; el bloqueo es real y no es de este
-    # workflow en particular. Sigue pendiente: ticket a GitHub Support.
-    - cron: "0 15,17,19,21,23 * * *"
+    # Re-test cada 1 min (2026-08-28 ~20:15 UTC) tras el commit 406369a que
+    # retocó los 8 workflows con schedule para forzar el re-registro del
+    # cron. Volver a "0 15,17,19,21,23 * * *" apenas se confirme que
+    # `schedule` dispara de nuevo.
+    - cron: "* * * * *"
   workflow_dispatch:
     inputs:
       fecha:
