@@ -2,20 +2,17 @@ name: Asistencia Sync
 
 on:
   schedule:
-    # Sync cada 3 horas, 7:00 a 22:00 America/Santiago (Chile continental
-    # es UTC-4 fijo, sin horario de verano — mismo criterio que
-    # red-sync.yml/teamcore-sync.yml): 7,10,13,16,19,22 Chile =
-    # 11,14,17,20,23,2 UTC. Bajado de 1 hora a 3 horas (17 -> 6 corridas
-    # diarias) para caber en los 2.000 min/mes de Actions; la API de
-    # GeoVictoria devuelve el rango completo en cada corrida, asi que
-    # espaciar no pierde marcaciones, solo las muestra mas tarde.
-    - cron: "0 11,14,17,20,23,2 * * *"
+    # Sync cada 3 horas, 08:00 a 17:00 Chile: 8,11,14,17 Chile = 12,15,18,21 UTC
+    # (Chile continental es UTC-4 fijo, sin horario de verano.)
+    - cron: "0 12,15,18,21 * * *"
     # Reset diario, 3:00 AM Chile = 07:00 UTC.
     - cron: "0 7 * * *"
-    # Roster de colaboradores (Turnos Extras) diario, 6:00 AM Chile = 10:00 UTC
-    # — antes de que arranque el día, para que los supervisores ya vean el
-    # roster actualizado desde la primera solicitud.
-    - cron: "0 10 * * *"
+    # El roster de colaboradores (Turnos Extras) ya NO se programa aca: se
+    # movio a pg_cron en Supabase, invocando la Edge Function roster-sync
+    # (misma logica, misma hora 06:00 Chile) — ver
+    # supabase/migrations/20260828030000_cron_roster_y_cobertura.sql.
+    # El workflow_dispatch con modo=roster sigue disponible como respaldo
+    # manual, y el paso "Roster de colaboradores" de abajo lo atiende.
   workflow_dispatch:
     inputs:
       modo:

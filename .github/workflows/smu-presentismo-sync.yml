@@ -2,13 +2,9 @@ name: SMU Presentismo Sync
 
 on:
   schedule:
-    # Cada 3 horas, 6:00 a 21:00 America/Santiago (Chile continental sin
-    # horario de verano): 6,9,12,15,18,21 Chile = 10,13,16,19,22,1 UTC.
-    # Bajado de 1 hora a 3 horas (18 -> 6 corridas diarias) por el
-    # presupuesto de minutos de Actions. El upsert por (rut, local_code,
-    # fecha, acceso, ocurrencia) hace que las filas repetidas de corridas
-    # anteriores no dupliquen, asi que espaciar no pierde accesos.
-    - cron: "0 10,13,16,19,22,1 * * *"
+    # Cada 2 horas, 10:00 a 16:00 Chile: 10,12,14,16 Chile = 14,16,18,20 UTC
+    # (Chile continental es UTC-4 fijo, sin horario de verano.)
+    - cron: "0 14,16,18,20 * * *"
   workflow_dispatch:
     inputs:
       fecha:

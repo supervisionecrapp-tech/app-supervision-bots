@@ -2,13 +2,9 @@ name: DEC Documentos Sync
 
 on:
   schedule:
-    # Cada 5 horas, 7:00 a 22:00 Chile: 7,12,17,22 Chile = 11,16,21,2 UTC
-    # (Chile continental es UTC-4 fijo, sin horario de verano — mismo
-    # criterio que el resto de los bots). Bajado de 1 hora a 5 horas
-    # (18 -> 4 corridas diarias): era el bot mas caro del repo
-    # (~1.370 min/mes de los 2.000 disponibles) y los documentos
-    # pendientes de firma no cambian con cadencia horaria.
-    - cron: "0 11,16,21,2 * * *"
+    # Una vez al dia, 12:00 Chile = 16:00 UTC
+    # (Chile continental es UTC-4 fijo, sin horario de verano.)
+    - cron: "0 16 * * *"
   workflow_dispatch: {}
 
 jobs:

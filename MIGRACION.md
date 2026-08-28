@@ -15,7 +15,7 @@ presupuesto de minutos de Actions.
 |---|---|---|
 | Repo | 1 (privado, 290 KB, rama `main`) | único colaborador: `StarCrushed` |
 | Workflows | 15 | ver tabla en §5 |
-| Secrets | 15 | **no se transfieren solos** — hay que recrearlos |
+| Secrets | 15 | **viajaron solos** en la transferencia (verificado 28/08) |
 | Variables | 1 (`PRESENTISMO_RUNNER`) | referenciada pero hoy sin valor |
 | Runners propios | 0 | hay que registrar uno nuevo (ver §6) |
 
@@ -49,9 +49,15 @@ los 15 secrets. Planifica recrearlos (§3).
 
 ## 3. Secrets a migrar
 
-Los valores **no se pueden exportar** desde GitHub: son de solo escritura, ni
-la API ni la UI los devuelven. Hay que recuperar cada uno de su fuente
-original y volver a cargarlo. La columna "de dónde se saca" es esa fuente.
+**Corrección (28/08): los 15 secrets SÍ sobrevivieron a la transferencia.**
+Aparecen en el repo nuevo con sus timestamps originales intactos, así que no
+hubo que recargar ninguno. Este apartado queda como referencia de dónde sale
+cada valor, por si hay que rotarlo o recrearlo en el futuro.
+
+Ojo si algún día hay que reponerlos: los valores **no se pueden exportar**
+desde GitHub — son de solo escritura, ni la API ni la UI los devuelven. Habría
+que recuperar cada uno de su fuente original, que es la columna "de dónde se
+saca".
 
 | # | Secret | De dónde se saca | Usado por |
 |---|---|---|---|
@@ -111,7 +117,7 @@ Cada paso es verificable antes de pasar al siguiente.
    git -C bots remote set-url origin https://github.com/supervisionecrapp-tech/app-supervision-bots.git
    ```
 
-6. Cargar los 15 secrets (§3).
+6. ~~Cargar los 15 secrets.~~ **No hizo falta**: viajaron en la transferencia.
 7. Verificar que no falte ninguno — debe dar 15:
 
    ```bash
