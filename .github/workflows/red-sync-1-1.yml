@@ -1,16 +1,10 @@
 name: Red Sync 1.1
 
 on:
-  schedule:
-    # Lunes/miércoles/viernes (mismos días que venta-perdida-*.yml, a
-    # pedido explícito del usuario) + martes (para no perder la recarga de
-    # la semana anterior — ver el paso "Sync Red — semana anterior" más
-    # abajo, que sigue detectando martes por su cuenta). 11:00
-    # America/Santiago = 15:00 UTC (Chile continental tiene hora única
-    # todo el año, sin horario de verano — si eso cambia, ajustar este
-    # offset).
-    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
-    - cron: "0 15 * * 1,2,3,5"
+  # `schedule` nativo desactivado (29/08/2026): el disparo real lo hace un
+  # pg_cron en Supabase (job "dispatch-red-sync") pegándole a la API de
+  # workflow_dispatch, porque `schedule` está bloqueado/atrasado a nivel
+  # de cuenta en GitHub (ver README) — horario 11:00 Chile, lun/mar/mié/vie.
   workflow_dispatch:
     inputs:
       categoria:

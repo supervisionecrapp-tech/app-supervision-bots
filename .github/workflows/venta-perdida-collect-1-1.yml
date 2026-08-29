@@ -1,13 +1,11 @@
 name: Venta Perdida Sync — Collect 1.1
 
 on:
-  schedule:
-    # Lunes/miércoles/viernes 10:00 Chile = 14:00 UTC — 2h después de
-    # "request", para darle margen a la cola intermitente del portal
-    # (~45 min según lo observado, a veces más). Adentro además reintenta
-    # con su propio timeout de polling, así que el margen real es mayor.
-    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
-    - cron: "0 14 * * 1,3,5"
+  # `schedule` nativo desactivado (29/08/2026): el disparo real lo hace un
+  # pg_cron en Supabase (job "dispatch-venta-perdida-collect") pegándole a
+  # la API de workflow_dispatch, porque `schedule` está bloqueado/atrasado
+  # a nivel de cuenta en GitHub — horario 10:00 Chile, lun/mié/vie (2h
+  # después de "request").
   workflow_dispatch:
 
 jobs:
