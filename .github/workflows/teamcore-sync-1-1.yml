@@ -1,13 +1,20 @@
 name: Teamcore Sync 1.1
 
 on:
-  # `schedule` nativo desactivado (29/08/2026): venía bloqueado a nivel de
-  # cuenta (probado con 2FA y con este mismo workflow recreado desde cero,
-  # ver historial de commits) y cuando arrancó a disparar lo hizo con
-  # atraso (~1h) y solapado con el dispatch de pg_cron, duplicando
-  # corridas. El disparo real ahora lo hace un pg_cron en Supabase (job
-  # "dispatch-teamcore-sync") pegándole a la API de workflow_dispatch —
-  # horario 11,13,15,17,19 Chile, diario.
+  schedule:
+    # Cada 2 horas, 11:00 a 19:00 Chile: 11,13,15,17,19 Chile = 15,17,19,21,23 UTC
+    # (Chile continental es UTC-4 fijo, sin horario de verano.)
+    #
+    # Workflow "1.1": archivo nuevo (no un rename), creado 28/08/2026 tras
+    # activar 2FA en la cuenta supervisionecrapp-tech, para descartar que
+    # `schedule` estuviera bloqueado por "registro viejo" del workflow.
+    # Probado cada 1 min con ID de workflow nuevo (344911120) + 2FA activo:
+    # 5+ min, CERO triggers — mismo resultado que las pruebas anteriores
+    # (cuenta vieja, sin 2FA, workflow original). Descarta ambas hipótesis;
+    # el bloqueo de `schedule` no depende del workflow ni del 2FA. Sigue
+    # pendiente: ticket a GitHub Support. Hasta que se resuelva, estos bots
+    # solo corren por workflow_dispatch manual.
+    - cron: "0 15,17,19,21,23 * * *"
   workflow_dispatch:
     inputs:
       fecha:

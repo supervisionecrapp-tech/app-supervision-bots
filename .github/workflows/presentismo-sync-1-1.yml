@@ -1,12 +1,20 @@
 name: Presentismo Sync 1.1
 
 on:
-  # `schedule` nativo desactivado (29/08/2026): el disparo real lo hace un
-  # pg_cron en Supabase (job "dispatch-presentismo-sync") pegándole a la
-  # API de workflow_dispatch, porque `schedule` está bloqueado/atrasado a
-  # nivel de cuenta en GitHub (ver README) — horario 10,12,14,16 Chile.
-  # Dejar los dos prendidos duplicaba corridas cuando `schedule` arrancó a
-  # disparar tarde y solapado con el dispatch de pg_cron.
+  schedule:
+    # A partir del 29/08/2026, mismo horario que smu-presentismo-sync.yml
+    # a propósito (a pedido explícito del usuario) — 4 veces al día, 10:00
+    # a 16:00 Chile = 14,16,18,20 UTC (Chile continental es UTC-4 fijo, sin
+    # horario de verano).
+    #
+    # El 28/08 corrió cada 1 hora (18/día) para probar la cookie de sesión
+    # + el keepalive de Supabase (presentismo-keepalive, cada 10 min) recién
+    # armados — con eso confirmado, no hace falta esa frecuencia: con la
+    # cookie cada corrida exitosa tarda ~1-2 min (sin login, sin esperar al
+    # solver de Turnstile), muy por debajo de los ~1.820 min/mes que
+    # consumían las 18 corridas/día de la época con login normal.
+    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
+    - cron: "0 14,16,18,20 * * *"
   workflow_dispatch:
     inputs:
       fecha:

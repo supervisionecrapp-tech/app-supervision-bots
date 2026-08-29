@@ -1,12 +1,17 @@
 name: Venta Perdida Sync — Request 1.1
 
 on:
-  # `schedule` nativo desactivado (29/08/2026): el disparo real lo hace un
-  # pg_cron en Supabase (job "dispatch-venta-perdida-request") pegándole a
-  # la API de workflow_dispatch, porque `schedule` está bloqueado/atrasado
-  # a nivel de cuenta en GitHub — horario 08:00 Chile, lun/mié/vie. El
-  # objetivo de semana lo sigue decidiendo src/scrape.mjs#targetWeekForToday
-  # según el día.
+  schedule:
+    # Lunes/miércoles/viernes 08:00 Chile = 12:00 UTC (sin horario de
+    # verano en Chile continental, ver la misma nota en red-sync.yml).
+    # El objetivo de semana lo decide src/scrape.mjs#targetWeekForToday
+    # según el día: lunes pide SOLO la semana anterior (ya cerrada,
+    # siempre completa); miércoles y viernes piden SOLO la semana actual
+    # (para levantar la carga parcial a mitad y fin de semana).
+    # "collect" corre 2h después el mismo día (venta-perdida-collect.yml)
+    # y "retry" unas horas más tarde si algo falló (venta-perdida-retry.yml).
+    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
+    - cron: "0 12 * * 1,3,5"
   workflow_dispatch:
 
 jobs:
