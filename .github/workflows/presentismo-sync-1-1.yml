@@ -18,7 +18,11 @@ on:
   workflow_dispatch:
     inputs:
       fecha:
-        description: "Fecha 'hasta' (YYYY-MM-DD, opcional). 'desde' es siempre el día anterior. Vacío = hoy."
+        description: "Fecha 'hasta' (YYYY-MM-DD, opcional). Vacío = hoy."
+        required: false
+        type: string
+      desde:
+        description: "Fecha 'desde' (YYYY-MM-DD, opcional). Vacío = el día anterior a 'hasta' (comportamiento normal). Para backfills de varios días."
         required: false
         type: string
 
@@ -70,6 +74,7 @@ jobs:
           # presentismo-sync/scripts/capturar_cookie.py.
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FECHA: ${{ github.event.inputs.fecha }}
+          DESDE: ${{ github.event.inputs.desde }}
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then

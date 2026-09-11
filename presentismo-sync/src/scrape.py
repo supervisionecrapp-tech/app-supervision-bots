@@ -171,17 +171,21 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
-def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None, cf_clearance: str | None = None) -> Path:
+def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None, cf_clearance: str | None = None, fecha_fi: dt.date | None = None) -> Path:
     """Loguea, filtra el rango de fechas y descarga el Excel de "Detalle de
     marcas". `fecha_ff` es la fecha que queda en el campo "hasta" (se deja
     tal cual la trae el portal si no se toca; acá se pasa explícita para
-    que quede logueada). El campo "desde" siempre es el día anterior a
-    `fecha_ff`, a pedido explícito del usuario.
+    que quede logueada). El campo "desde" es el día anterior a `fecha_ff`
+    por default (a pedido explícito del usuario para la corrida normal),
+    salvo que se pase `fecha_fi` explícito — para backfills de rango
+    (el portal acepta hasta 31 días, visto en el filtro de "Reportes de
+    Marcas").
 
     `session_cookie`: si se pasa (viene de `bot_config` en Supabase, ver
     `sync.py`), se entra por sesión ya abierta y no se toca el login."""
     download_dir.mkdir(parents=True, exist_ok=True)
-    fecha_fi = fecha_ff - dt.timedelta(days=1)
+    if fecha_fi is None:
+        fecha_fi = fecha_ff - dt.timedelta(days=1)
 
     screenshots_dir = download_dir / "screenshots"
     screenshots_dir.mkdir(parents=True, exist_ok=True)

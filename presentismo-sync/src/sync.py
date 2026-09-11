@@ -50,6 +50,15 @@ def read_fecha() -> dt.date:
     return dt.datetime.now(SANTIAGO).date()
 
 
+def read_desde() -> dt.date | None:
+    """DESDE opcional en formato YYYY-MM-DD (workflow_dispatch). Vacío =
+    None, y scrape_presentismo_export usa el default (el día anterior a
+    "hasta"). Para traer varios días de una (backfill) desde el mismo
+    trigger manual, sin tocar el comportamiento normal del cron."""
+    desde_arg = os.environ.get("DESDE") or (sys.argv[2] if len(sys.argv) > 2 else None)
+    return dt.date.fromisoformat(desde_arg) if desde_arg else None
+
+
 def with_retries(intentar, max_intentos: int = 2, espera_base_s: int = 90):
     """Reintenta `intentar()` hasta `max_intentos` veces, con espera
     EXPONENCIAL (90s, 180s, 360s, ...) entre intentos.
@@ -104,6 +113,7 @@ def log_run(supabase, *, fecha_iso: str, started_at: str, status: str, error_mes
 def main() -> None:
     cargar_env_local()
     fecha = read_fecha()
+    desde = read_desde()
     frax_user = require_env("FRAX_USER")
     frax_pass = require_env("FRAX_PASS")
     supabase_url = os.environ.get("SUPABASE_URL", "https://lbwwnrsbgaxjulpfbwdz.supabase.co")
@@ -113,7 +123,8 @@ def main() -> None:
     download_dir = Path(os.environ.get("DOWNLOAD_DIR", "./downloads"))
 
     fecha_iso = fecha.isoformat()
-    print(f"Sincronizando Presentismo (marcaciones) — hasta {fecha_iso} (desde el día anterior)")
+    desde_msg = desde.isoformat() if desde else "el día anterior"
+    print(f"Sincronizando Presentismo (marcaciones) — hasta {fecha_iso} (desde {desde_msg})")
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
 
     # bot_config es el mismo lugar que lee/actualiza presentismo-keepalive
@@ -132,7 +143,7 @@ def main() -> None:
     try:
         def intentar():
             file_path = scrape_presentismo_export(
-                fecha_ff=fecha, frax_user=frax_user, frax_pass=frax_pass, download_dir=download_dir,
+                fecha_ff=fecha, fecha_fi=desde, frax_user=frax_user, frax_pass=frax_pass, download_dir=download_dir,
                 session_cookie=session_cookie, cf_clearance=cf_clearance,
             )
             print(f"Archivo descargado: {file_path}")
