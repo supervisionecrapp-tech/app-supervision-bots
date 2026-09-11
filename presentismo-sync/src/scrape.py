@@ -171,7 +171,7 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
-def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None) -> Path:
+def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None, cf_clearance: str | None = None) -> Path:
     """Loguea, filtra el rango de fechas y descarga el Excel de "Detalle de
     marcas". `fecha_ff` es la fecha que queda en el campo "hasta" (se deja
     tal cual la trae el portal si no se toca; acá se pasa explícita para
@@ -234,23 +234,43 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     # viva. Un solo lugar, para no tener la cookie duplicada y potencialmente
     # desincronizada entre un secret de GitHub y Supabase.
     cookie_sesion = (session_cookie or "").strip()
+    cf_clearance_val = (cf_clearance or "").strip()
     if cookie_sesion:
-        print("Hay cookie de sesión en bot_config: se entra por cookie, sin pasar por el login.")
+        print(
+            "Hay cookie de sesión en bot_config: se entra por cookie"
+            + (" + cf_clearance" if cf_clearance_val else " (SIN cf_clearance, va a fallar contra Cloudflare)")
+            + ", sin pasar por el login."
+        )
 
         def entrar_con_cookie(page):
             try:
-                page.context.add_cookies(
-                    [
+                cookies_a_inyectar = [
+                    {
+                        "name": "PHPSESSID",
+                        "value": cookie_sesion,
+                        "domain": "www.controltienda.com",
+                        "path": "/",
+                        "httpOnly": True,
+                        "secure": True,
+                    }
+                ]
+                if cf_clearance_val:
+                    # Sin esta cookie, Cloudflare desafía cada navegación
+                    # real del browser headful aunque PHPSESSID siga vivo
+                    # — confirmado con los fallos del 09-09 al 09-11
+                    # (index.php pasaba por un fetch plano sin JS, pero
+                    # /reportes/ siempre redirigía a login.php).
+                    cookies_a_inyectar.append(
                         {
-                            "name": "PHPSESSID",
-                            "value": cookie_sesion,
-                            "domain": "www.controltienda.com",
+                            "name": "cf_clearance",
+                            "value": cf_clearance_val,
+                            "domain": ".controltienda.com",
                             "path": "/",
                             "httpOnly": True,
                             "secure": True,
                         }
-                    ]
-                )
+                    )
+                page.context.add_cookies(cookies_a_inyectar)
                 page.goto(f"{BASE_URL}/reportes/")
                 try:
                     page.wait_for_selector("#btn-export-detalle", timeout=25000)

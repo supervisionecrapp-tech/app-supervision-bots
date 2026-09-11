@@ -1,3 +1,20 @@
+"""Variante de sync.py que SIEMPRE loguea de cero (resolviendo el Turnstile
+de Cloudflare), sin leer ni depender de ninguna cookie en bot_config.
+
+Por qué existe: la vía por cookie (sync.py) necesita `capturar_cookie.py`
+corrido a mano cada pocos días desde una máquina de confianza, y si esa
+cookie muere (como pasó del 09-09 al 09-11: `frax_session_cookie` quedó
+vieja 10 días sin que nadie se diera cuenta) el bot deja de traer datos
+hasta que alguien la regenera. Este script no tiene ese punto de falla:
+cada corrida hace login real.
+
+El costo es el de siempre — confirmado en `bots/MIGRACION.md` §5: Turnstile
+solo entrega el token desde una IP con buena reputación (residencial/casa),
+nunca desde los runners de GitHub Actions (rangos de Azure). Por eso este
+script está pensado para correr en un runner self-hosted con IP normal
+(ver `.github/workflows/presentismo-sync-selfhosted.yml`), no en
+`ubuntu-latest`."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -15,13 +32,6 @@ SANTIAGO = ZoneInfo("America/Santiago")
 
 
 def cargar_env_local() -> None:
-    """Carga `presentismo-sync/.env.local` si existe (formato KEY=valor).
-
-    Solo para correr el bot a mano desde una máquina de confianza: en
-    GitHub Actions las credenciales llegan por `secrets` y el archivo no
-    existe. Lo de arriba nunca pisa lo que ya venga en el entorno, así
-    que en CI es un no-op. Parser propio a propósito, para no sumar
-    python-dotenv como dependencia por 8 líneas."""
     env_file = Path(__file__).resolve().parent.parent / ".env.local"
     if not env_file.is_file():
         return
@@ -41,9 +51,6 @@ def require_env(name: str) -> str:
 
 
 def read_fecha() -> dt.date:
-    """FECHA opcional en formato YYYY-MM-DD (workflow_dispatch); default =
-    hoy en huso horario de Chile. Es la fecha que queda en el campo
-    "hasta" del filtro del portal."""
     fecha_arg = os.environ.get("FECHA") or (sys.argv[1] if len(sys.argv) > 1 else None)
     if fecha_arg:
         return dt.date.fromisoformat(fecha_arg)
@@ -51,27 +58,7 @@ def read_fecha() -> dt.date:
 
 
 def with_retries(intentar, max_intentos: int = 2, espera_base_s: int = 90):
-    """Reintenta `intentar()` hasta `max_intentos` veces, con espera
-    EXPONENCIAL (90s, 180s, 360s, ...) entre intentos.
-
-    Solo 2 intentos, a propósito: el workflow corre cada hora y el filtro
-    del portal siempre va desde el día anterior, así que una corrida que
-    falla no pierde datos — la siguiente vuelve a traer el rango completo
-    y el upsert (rut_persona, local_code, entrada) deduplica. Insistir
-    más dentro de la misma corrida no gana nada y sí alimenta la escalada
-    del challenge: con 4 intentos eran hasta 72 logins fallidos por día
-    desde la misma IP de GitHub Actions.
-
-    Backoff exponencial en vez de lineal, a propósito: confirmado a mano
-    por el usuario (corriendo el login manualmente muchas veces seguidas
-    desde la misma IP) que el portal empieza a escalar el challenge de
-    Cloudflare a modo interactivo cuanto más seguido se lo golpea — mismo
-    criterio que documenta Scrapling para su AutoThrottle
-    (`autothrottle_block_backoff`): cualquier respuesta bloqueada DUPLICA
-    el delay del dominio en vez de un incremento fijo, precisamente para
-    no seguir alimentando esa escalada. Los reintentos rápidos (lineal,
-    60/120s) que probamos antes nunca le daban tiempo a la sesión/IP a
-    "enfriarse" entre intento e intento."""
+    """Mismo criterio de backoff exponencial que sync.py — ver ahí el porqué."""
     for intento in range(1, max_intentos + 1):
         try:
             return intentar()
@@ -89,8 +76,12 @@ def log_run(supabase, *, fecha_iso: str, started_at: str, status: str, error_mes
     try:
         supabase.table("bot_runs").insert(
             {
-                "bot": "presentismo-sync",
-                "categoria": fecha_iso,  # se reusa esta columna genérica para guardar la fecha consultada
+                # Nombre distinto de "presentismo-sync" a propósito: son dos
+                # bots corriendo en paralelo (cookie vs. login real) mientras
+                # se confirma que este reemplaza al otro, y bot_runs debe
+                # poder distinguir cuál trajo cada corrida.
+                "bot": "presentismo-sync-login",
+                "categoria": fecha_iso,
                 "status": status,
                 "error_message": error_message,
                 "filas_cargadas": filas_cargadas,
@@ -113,27 +104,17 @@ def main() -> None:
     download_dir = Path(os.environ.get("DOWNLOAD_DIR", "./downloads"))
 
     fecha_iso = fecha.isoformat()
-    print(f"Sincronizando Presentismo (marcaciones) — hasta {fecha_iso} (desde el día anterior)")
+    print(f"Sincronizando Presentismo (login real, sin cookie) — hasta {fecha_iso} (desde el día anterior)")
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
-
-    # bot_config es el mismo lugar que lee/actualiza presentismo-keepalive
-    # (Edge Function en Supabase, cada 10 min) para mantener la sesión viva.
-    # Un solo lugar en vez de un secret de GitHub duplicado.
-    cookie_row = (
-        supabase.table("bot_config").select("value").eq("key", "frax_session_cookie").maybe_single().execute()
-    )
-    session_cookie = (cookie_row.data or {}).get("value") if cookie_row else None
-
-    cf_clearance_row = (
-        supabase.table("bot_config").select("value").eq("key", "frax_cf_clearance").maybe_single().execute()
-    )
-    cf_clearance = (cf_clearance_row.data or {}).get("value") if cf_clearance_row else None
 
     try:
         def intentar():
+            # session_cookie=None a propósito: fuerza la rama de scrape.py
+            # que resuelve el Turnstile y loguea de cero en cada corrida,
+            # nunca la rama por cookie.
             file_path = scrape_presentismo_export(
                 fecha_ff=fecha, frax_user=frax_user, frax_pass=frax_pass, download_dir=download_dir,
-                session_cookie=session_cookie, cf_clearance=cf_clearance,
+                session_cookie=None, cf_clearance=None,
             )
             print(f"Archivo descargado: {file_path}")
             return upload_presentismo_file(

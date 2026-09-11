@@ -70,6 +70,8 @@ def main() -> None:
         for cookie in page.context.cookies():
             if cookie["name"] == "PHPSESSID":
                 capturado["phpsessid"] = cookie["value"]
+            elif cookie["name"] == "cf_clearance":
+                capturado["cf_clearance"] = cookie["value"]
         return page
 
     with StealthySession(
@@ -85,20 +87,29 @@ def main() -> None:
 
     if "phpsessid" not in capturado:
         raise SystemExit("No se pudo loguear; volvé a intentar.")
+    if "cf_clearance" not in capturado:
+        # Sin esto el browser headful del bot entra "limpio" a ojos de
+        # Cloudflare y lo desafía en cada navegación real, aunque el
+        # PHPSESSID siga siendo válido — causa confirmada de los fallos
+        # del 09-09 al 09-11: el bot solo inyectaba PHPSESSID.
+        raise SystemExit(
+            "Se logueó pero no se encontró la cookie cf_clearance. "
+            "Sin ella el bot va a seguir fallando en /reportes/. Volvé a intentar."
+        )
 
     supabase = create_client(supabase_url, supabase_key)
     # updated_at explícito: el default de la columna solo aplica en el
     # INSERT inicial, no en cada UPDATE de un upsert — sin esto,
     # updated_at quedaba pegado en la primera vez que se creó la fila y no
     # servía para confirmar que una regeneración posterior sí escribió.
+    ahora = dt.datetime.now(dt.timezone.utc).isoformat()
     supabase.table("bot_config").upsert(
-        {
-            "key": "frax_session_cookie",
-            "value": capturado["phpsessid"],
-            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        }
+        [
+            {"key": "frax_session_cookie", "value": capturado["phpsessid"], "updated_at": ahora},
+            {"key": "frax_cf_clearance", "value": capturado["cf_clearance"], "updated_at": ahora},
+        ]
     ).execute()
-    print("Cookie guardada en Supabase (bot_config.frax_session_cookie). Listo.")
+    print("Cookie + cf_clearance guardadas en Supabase (bot_config). Listo.")
 
 
 if __name__ == "__main__":
