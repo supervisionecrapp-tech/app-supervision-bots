@@ -59,13 +59,9 @@ jobs:
       # `playwright install` en los otros bots de este repo.
       - run: scrapling install
 
-      # Camoufox (Firefox endurecido contra fingerprinting) para
-      # MOTOR=camoufox. `fetch` baja el build del browser, que no viene en
-      # el paquete de pip.
-      - name: Instalar Camoufox
-        run: |
-          pip install "camoufox[geoip]"
-          python -m camoufox fetch
+      # Baja el build de Firefox de Camoufox (el paquete de pip, que ya
+      # instaló requirements.txt, no lo incluye).
+      - run: python -m camoufox fetch
 
       # El scrape corre HEADFUL (headless=False) porque Cloudflare detecta
       # Chrome headless. En Linux eso necesita un display: xvfb se lo da
@@ -84,14 +80,14 @@ jobs:
           # Ya no se lee ninguna cookie de bot_config: sync_login.py loguea
           # de cero en cada corrida.
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          # Proxy RESIDENCIAL (http://user:pass@host:puerto). Sin esto el
-          # login se rechaza con login.php?error=captcha desde la IP del
-          # runner: el portal acepta su propio fallback solo desde IPs de
-          # buena reputación (verificado el 14/09/2026). Si el secret no
-          # está cargado, el bot sale directo y el login va a fallar.
+          # Opcional y hoy SIN USAR: el bot entra bien desde la IP del
+          # runner con MOTOR=camoufox. Queda por si alguna vez hace falta
+          # salir por otra IP; si el secret no existe, se sale directo.
           FRAX_PROXY: ${{ secrets.FRAX_PROXY }}
           # Motor del login: "camoufox" (Firefox endurecido, sin CDP) o
-          # vacío para el StealthySession de Scrapling (Chromium).
+          # "scrapling" para el StealthySession de Chromium.
+          # camoufox es el que funciona: con Chromium el Turnstile escala a
+          # checkbox interactivo y el server contesta error=captcha.
           MOTOR: ${{ github.event.inputs.motor || 'camoufox' }}
           FECHA: ${{ github.event.inputs.fecha }}
           DESDE: ${{ github.event.inputs.desde }}

@@ -287,14 +287,19 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     `session_cookie`: si se pasa (viene de `bot_config` en Supabase, ver
     `sync.py`), se entra por sesión ya abierta y no se toca el login.
 
-    `proxy`: URL de proxy (formato `http://user:pass@host:puerto`). Hace
-    falta uno RESIDENCIAL para que el login funcione desde GitHub Actions:
-    medido el 14/09/2026, el portal acepta el login por `cf_fallback=1`
-    desde una IP residencial y lo rechaza (`login.php?error=captcha`)
-    desde la IP del runner. Se descartó que fuera por `fp_sig`: inyectando
-    a mano las señales de automatización del runner (`webgl_sw,no_plugins`)
-    el login desde IP residencial entra igual. Lo único que cambia es la
-    reputación de la IP."""
+    `proxy`: opcional (formato `http://user:pass@host:puerto`). HOY NO HACE
+    FALTA: con `MOTOR=camoufox` el login entra bien desde la IP del runner
+    de GitHub. Queda por si alguna vez hay que salir por otra IP.
+
+    Sobre el bloqueo que costó un día entero (14/09/2026): NO era la IP
+    —con un proxy de datacenter en Francia y un Chrome real el login
+    pasaba— ni `fp_sig` —inyectando a mano las señales del runner
+    (`webgl_sw,no_plugins`) entraba igual—. Era el entorno del navegador:
+    con Chromium/Patchright bajo xvfb, Turnstile ESCALA a un checkbox
+    interactivo y el servidor contesta "No pudimos verificar tu
+    navegador" (`login.php?error=captcha`). Con Camoufox (Firefox, sin
+    CDP, parches a nivel del motor) el widget no escala y entra en la
+    primera tirada."""
     download_dir.mkdir(parents=True, exist_ok=True)
     if fecha_fi is None:
         fecha_fi = fecha_ff - dt.timedelta(days=1)

@@ -1,3 +1,8 @@
 scrapling[fetchers]>=0.2.9
+# Motor del login (MOTOR=camoufox). Scrapling 0.4.15 ya no lo trae — lo
+# usaba en 0.2.x — y es lo único que logra pasar el Turnstile del portal
+# desde GitHub Actions. El build del browser se baja aparte con
+# `python -m camoufox fetch` (ver el workflow).
+camoufox[geoip]>=0.4
 openpyxl>=3.1
 supabase>=2.7
