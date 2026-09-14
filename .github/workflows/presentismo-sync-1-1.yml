@@ -32,6 +32,16 @@ on:
         type: choice
         options: [camoufox, scrapling]
 
+# Una corrida por vez. El portal es sensible a sesiones simultáneas de la
+# misma cuenta: el 14/09 dos corridas lanzadas con 11 segundos de
+# diferencia (34906043888 y 34906061401) terminaron una verde y la otra
+# colgada. `cancel-in-progress: false` las encola en vez de matarlas, así
+# un cron que caiga encima de una corrida manual espera su turno en lugar
+# de pisarla.
+concurrency:
+  group: presentismo-sync
+  cancel-in-progress: false
+
 jobs:
   run:
     # ubuntu-latest alcanza desde el 14/09/2026: el bot ya no necesita que
