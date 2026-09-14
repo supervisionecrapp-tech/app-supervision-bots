@@ -617,43 +617,38 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
 
     Se espera la respuesta de `api_interaccion.php` para no correr una
     carrera entre la marca y la primera request de datos."""
-    # Los gestos se despachan por JS, NO con `page.mouse`. Motivo: tanto
-    # `mouse.wheel` (run 34901770057) como `mouse.move` con humanize
-    # (runs 34903029137 y 34903480494) bloquean de forma síncrona en
-    # Camoufox bajo xvfb, y al bloquear dentro del `with` ni siquiera
-    # llega a dispararse el timeout del expect_response: la corrida queda
-    # congelada hasta que la mata el job.
+    # Tiene que ser input REAL del navegador (`page.mouse`), no
+    # `dispatchEvent` desde la página: probado el 14/09, con eventos
+    # sintéticos el reporte vuelve a venir en 0 desde el runner, aunque
+    # api_interaccion.php responda igual. Localmente los sintéticos
+    # alcanzan, pero el runner arranca con peor score y ahí la telemetría
+    # de Cloudflare —que lee el input a nivel del motor, donde un
+    # dispatchEvent no pasa— parece pesar.
     #
-    # human.js escucha con addEventListener y no mira `isTrusted`, así que
-    # los eventos despachados desde la página lo marcan igual. Y esto no
-    # puede colgarse.
-    def gestos():
-        page.evaluate(
-            """() => {
-                const disparar = (tipo, x, y) => window.dispatchEvent(
-                    new MouseEvent(tipo, {bubbles: true, clientX: x, clientY: y})
-                );
-                disparar('mousemove', 420, 300);
-                disparar('mousemove', 660, 430);
-                disparar('mousedown', 660, 430);
-                window.scrollBy(0, 240);
-                window.scrollBy(0, -240);
-            }"""
-        )
-
+    # Lo que SÍ hay que evitar es que esos gestos puedan colgarse:
+    #   - `mouse.wheel` no retorna nunca en Firefox bajo xvfb
+    #     (run 34901770057) -> se usa window.scrollBy para el 'scroll'.
+    #   - `mouse.move` con humanize=True tampoco tiene tope
+    #     (runs 34903029137/34903480494) -> el motor ahora usa
+    #     humanize=1.5, que acota cada movimiento.
+    # Y los gestos van FUERA de cualquier `expect_response`: si bloquean
+    # dentro del `with`, su timeout ni siquiera llega a evaluarse.
     try:
-        with page.expect_response(
-            lambda r: "api_interaccion.php" in r.url, timeout=25000
-        ):
-            gestos()
-        print("Sesión marcada como humana (api_interaccion.php respondió).")
-        return True
+        page.mouse.move(420, 300)
+        page.mouse.move(660, 430)
+        page.evaluate("() => window.scrollBy(0, 240)")
+        page.mouse.move(700, 520)
+        page.evaluate("() => window.scrollBy(0, -240)")
     except Exception as err:  # noqa: BLE001
-        # `sendBeacon` puede no exponer la respuesta, y si la sesión ya
-        # estaba marcada el portal no vuelve a pegarle. No es fatal: los
-        # gestos igual se hicieron.
-        print(f"No se confirmó la marca humana ({err}); se sigue igual.")
+        print(f"Falló algún gesto de la marca humana: {err}")
         return False
+
+    # Margen para que salga el beacon a api_interaccion.php. No se usa
+    # expect_response a propósito (ver arriba); si la marca no prendió,
+    # el chequeo de `filas` más abajo lo va a cazar igual.
+    page.wait_for_timeout(2000)
+    print("Gestos de interacción humana enviados.")
+    return True
 
 
 def _esperar_datos_reporte(page, *, segundos: int = 90) -> int:
