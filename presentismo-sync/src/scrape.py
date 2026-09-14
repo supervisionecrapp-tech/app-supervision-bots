@@ -246,7 +246,12 @@ def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None,
 
     opciones = {
         "headless": False,
-        "humanize": True,
+        # Número, no True: `humanize` anima el recorrido del cursor y con
+        # True esa animación no tiene tope — bloquea de forma SÍNCRONA y
+        # colgaba corridas enteras (runs 34903029137 y 34903480494, ambas
+        # congeladas en `page.mouse.move`). Como float es el máximo de
+        # segundos por movimiento, así que acota el peor caso.
+        "humanize": 1.5,
         "geoip": True,
         "locale": "es-CL",
         "os": "windows",
@@ -612,20 +617,29 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
 
     Se espera la respuesta de `api_interaccion.php` para no correr una
     carrera entre la marca y la primera request de datos."""
-    # NO usar `page.mouse.wheel()`: en Camoufox (Firefox) bajo xvfb cuelga
-    # sin devolver nunca — el run 34901770057 quedó 6 minutos congelado acá,
-    # sin llegar siquiera al timeout del expect_response. El evento
-    # `scroll` que human.js escucha lo dispara igual `window.scrollBy`.
+    # Los gestos se despachan por JS, NO con `page.mouse`. Motivo: tanto
+    # `mouse.wheel` (run 34901770057) como `mouse.move` con humanize
+    # (runs 34903029137 y 34903480494) bloquean de forma síncrona en
+    # Camoufox bajo xvfb, y al bloquear dentro del `with` ni siquiera
+    # llega a dispararse el timeout del expect_response: la corrida queda
+    # congelada hasta que la mata el job.
+    #
+    # human.js escucha con addEventListener y no mira `isTrusted`, así que
+    # los eventos despachados desde la página lo marcan igual. Y esto no
+    # puede colgarse.
     def gestos():
-        page.mouse.move(420, 300)
-        page.wait_for_timeout(120)
-        page.mouse.move(660, 430)
-        page.wait_for_timeout(120)
-        page.evaluate("() => window.scrollBy(0, 240)")
-        page.wait_for_timeout(120)
-        page.mouse.move(700, 520)
-        page.wait_for_timeout(120)
-        page.evaluate("() => window.scrollBy(0, -240)")
+        page.evaluate(
+            """() => {
+                const disparar = (tipo, x, y) => window.dispatchEvent(
+                    new MouseEvent(tipo, {bubbles: true, clientX: x, clientY: y})
+                );
+                disparar('mousemove', 420, 300);
+                disparar('mousemove', 660, 430);
+                disparar('mousedown', 660, 430);
+                window.scrollBy(0, 240);
+                window.scrollBy(0, -240);
+            }"""
+        )
 
     try:
         with page.expect_response(
