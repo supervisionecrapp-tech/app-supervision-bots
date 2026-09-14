@@ -258,7 +258,15 @@ def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None,
         for vuelta in range(1, vueltas + 1):
             intento["n"] = vuelta
             print(f"--- Tirada {vuelta}/{vueltas} (camoufox) ---")
-            page = browser.new_page()
+            page = browser.new_page(accept_downloads=True)
+            # Sin esto la página usa el default de Playwright (30s) y la
+            # descarga del Excel se cae con "Timeout 30000ms exceeded
+            # while waiting for event download" cuando el portal tarda en
+            # generarlo (run 34879928067: el login entraba bien y se caía
+            # siempre en el export). El camino de Chromium no tenía el
+            # problema porque heredaba el timeout de StealthySession.
+            page.set_default_timeout(90000)
+            page.set_default_navigation_timeout(90000)
             try:
                 page.goto(f"{BASE_URL}/login.php", timeout=90000)
                 interactuar(page)
@@ -487,8 +495,11 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     # cursor de forma humana desde el browser — justo lo que Turnstile
     # estaba rechazando cuando el widget escaló a checkbox interactivo.
     if os.environ.get("MOTOR", "").lower() == "camoufox":
+        # 3 tiradas, no 5: el login ya entra de forma confiable, y cada
+        # tirada puede esperar hasta 180s por la descarga. Con 5 el job se
+        # pasaba de los 15 min de timeout antes de terminar.
         _login_camoufox(
-            interactuar, intento, downloaded_path, proxy=proxy, vueltas=5,
+            interactuar, intento, downloaded_path, proxy=proxy, vueltas=3,
         )
         if "path" not in downloaded_path:
             raise RuntimeError("El flujo terminó sin descargar el archivo (camoufox).")
@@ -619,7 +630,10 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
 
     file_path = download_dir / f"presentismo-{fecha_fi.isoformat()}_{fecha_ff.isoformat()}.xlsx"
     try:
-        with page.expect_download() as download_info:
+        # timeout explícito: el portal genera el Excel server-side y con
+        # rangos grandes tarda bastante más que los 30s que Playwright usa
+        # por default. No depender del default de la página.
+        with page.expect_download(timeout=180000) as download_info:
             page.click("#btn-export-detalle")
         download = download_info.value
         download.save_as(str(file_path))
