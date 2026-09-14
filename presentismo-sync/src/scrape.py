@@ -612,24 +612,32 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
 
     Se espera la respuesta de `api_interaccion.php` para no correr una
     carrera entre la marca y la primera request de datos."""
+    # NO usar `page.mouse.wheel()`: en Camoufox (Firefox) bajo xvfb cuelga
+    # sin devolver nunca — el run 34901770057 quedó 6 minutos congelado acá,
+    # sin llegar siquiera al timeout del expect_response. El evento
+    # `scroll` que human.js escucha lo dispara igual `window.scrollBy`.
+    def gestos():
+        page.mouse.move(420, 300)
+        page.wait_for_timeout(120)
+        page.mouse.move(660, 430)
+        page.wait_for_timeout(120)
+        page.evaluate("() => window.scrollBy(0, 240)")
+        page.wait_for_timeout(120)
+        page.mouse.move(700, 520)
+        page.wait_for_timeout(120)
+        page.evaluate("() => window.scrollBy(0, -240)")
+
     try:
         with page.expect_response(
-            lambda r: "api_interaccion.php" in r.url, timeout=20000
+            lambda r: "api_interaccion.php" in r.url, timeout=25000
         ):
-            page.mouse.move(420, 300)
-            page.wait_for_timeout(150)
-            page.mouse.move(660, 430)
-            page.wait_for_timeout(150)
-            page.mouse.wheel(0, 240)
-            page.wait_for_timeout(150)
-            page.mouse.move(700, 520)
-            page.wait_for_timeout(150)
-            page.mouse.wheel(0, -240)
+            gestos()
         print("Sesión marcada como humana (api_interaccion.php respondió).")
         return True
     except Exception as err:  # noqa: BLE001
-        # `sendBeacon` puede no exponer la respuesta; si ya se había
-        # marcado antes, tampoco vuelve a pegarle. No es fatal.
+        # `sendBeacon` puede no exponer la respuesta, y si la sesión ya
+        # estaba marcada el portal no vuelve a pegarle. No es fatal: los
+        # gestos igual se hicieron.
         print(f"No se confirmó la marca humana ({err}); se sigue igual.")
         return False
 
@@ -692,7 +700,9 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
 
     # ANTES de pedir datos: marcar la sesión como humana. El portal
     # exige esa marca en sus endpoints de datos (ver _marcar_sesion_humana).
+    print("Marcando sesión como humana...")
     _marcar_sesion_humana(page, captura)
+    print("Aplicando filtro de fechas...")
 
     # Inputs type=date nativos (value YYYY-MM-DD) — sin overlay de
     # calendario que cerrar. "hasta" (#f-ff) se deja tal cual lo trae
