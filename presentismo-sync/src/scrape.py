@@ -76,20 +76,50 @@ def _token_turnstile(page) -> str:
 def _esperar_token(page, *, segundos: int = 20) -> bool:
     """Espera a que Turnstile entregue el token antes de dejar submitear.
 
-    El widget del portal está montado con `data-appearance="interaction-only"`
-    (confirmado leyendo el HTML real de login.php): es INVISIBLE mientras
-    Cloudflare esté conforme y el token llega de forma ASÍNCRONA. El
-    <form id="loginForm"> no tiene ninguna guardia JS, así que si se
-    clickea "Entrar" antes de que el token exista, el POST viaja con
-    `cf-turnstile-response` vacío y el server responde
-    `login.php?error=captcha`. Esa es la causa raíz del run 33119160851:
-    el bot tipeaba y clickeaba ~2s después de cargar la página.
+    El token llega de forma ASÍNCRONA y el <form> arranca con el botón
+    `#btnEntrar` deshabilitado hasta que el callback `onCfOk` lo habilita.
     """
     for _ in range(segundos * 2):
         if _token_turnstile(page):
             return True
         page.wait_for_timeout(500)
     return False
+
+
+def _fallback_armado(page) -> bool:
+    """True si el propio login.php ya activó su vía de escape.
+
+    El portal trae su propio fallback (leído del JS de login.php el
+    14/09/2026): si Turnstile no resuelve en 7 segundos —o tira error,
+    caso "RBI, red corp, etc." según su propio comentario— el sitio pone
+    `cf_fallback=1`, habilita el botón "Entrar" y muestra el aviso "No se
+    pudo cargar la verificación automática; puedes continuar". Es decir:
+    el servidor ACEPTA el login sin token de Turnstile, por diseño.
+
+    Eso es exactamente lo que pasa desde los runners de GitHub (el widget
+    nunca resuelve con esa IP). El bot fallaba porque insistía en esperar
+    un token que el sitio no exige, en vez de usar la puerta que el propio
+    sitio deja abierta."""
+    try:
+        val = page.locator("#cf_fallback").first.input_value()
+        return (val or "").strip() == "1"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _esperar_token_o_fallback(page, *, segundos: int = 15) -> str:
+    """Espera a que el login quede submiteable, por cualquiera de las dos
+    vías. Devuelve "token", "fallback" o "" (ninguna).
+
+    El fallback del sitio tarda 7s en armarse, así que 15s de margen
+    alcanzan de sobra para las dos."""
+    for _ in range(segundos * 2):
+        if _token_turnstile(page):
+            return "token"
+        if _fallback_armado(page):
+            return "fallback"
+        page.wait_for_timeout(500)
+    return ""
 
 
 def _click_real_xdotool(page, captura) -> bool:
@@ -205,19 +235,16 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     downloaded_path: dict[str, Path] = {}
 
     def interactuar(page):
-        """Corre en cada `session.fetch()`. Si esta tirada no trajo token,
-        devuelve sin hacer nada y el bucle vuelve a fetchear."""
+        """Corre en cada `session.fetch()`."""
         try:
             page.wait_for_selector("#usuario", timeout=30000)
             captura(page, "01_login_page")
-            if not _esperar_token(page, segundos=25):
-                captura(page, "01c_sin_token")
-                # Solo tiene sentido si el widget escaló a interactivo; si
-                # pasa invisible, el token llega sin tocar nada.
-                _click_real_xdotool(page, captura)
-                if not _esperar_token(page, segundos=20):
-                    print("Esta tirada no trajo token; se vuelve a fetchear con el solver.")
-                    return page
+            via = _esperar_token_o_fallback(page, segundos=15)
+            if not via:
+                captura(page, "01c_sin_token_ni_fallback")
+                print("Ni token ni fallback; se vuelve a fetchear.")
+                return page
+            print(f"Login habilitado por: {via}.")
             _interactuar_paso(page, captura, downloaded_path, frax_user=frax_user, frax_pass=frax_pass, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir)
         except Exception:
             captura(page, "error_fatal")
@@ -363,16 +390,21 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # Acá ya hay token: el chequeo y las re-tiradas las hace `interactuar`
     # en `scrape_presentismo_export`, antes de llamar a esta función.
     #
-    # El formulario trae un campo señuelo (#usuario_v2 — 0x0 vía CSS
-    # pero no display:none, autocomplete="username") además del real
-    # (#usuario, autocomplete="organization"): un honeypot anti-bot
-    # confirmado inspeccionando el DOM en vivo. Llenamos por selector
-    # específico, nunca lo tocamos, igual que un usuario real.
+    # #usuario_v2 NO es un honeypot (el comentario viejo acá estaba
+    # equivocado): leyendo el JS de login.php, es el campo de usuario
+    # individual y el propio sitio lo muestra solo si
+    # api_check_multiusuario.php dice que ese RUT usa cuentas por persona.
+    # Para esta cuenta queda oculto y vacío, que es lo correcto.
     _tipear(page, "#usuario", frax_user)
     _tipear(page, "#clave", frax_pass)
 
-    captura(page, "01b_campos_llenos_con_token")
-    page.click("button.btn-login")
+    captura(page, "01b_campos_llenos")
+
+    # El botón arranca `disabled` y lo habilita el JS del sitio, sea por
+    # `onCfOk` (token) o por su propio fallback a los 7s. Esperarlo
+    # habilitado evita clickear al vacío.
+    page.wait_for_selector("#btnEntrar:not([disabled])", timeout=20000)
+    page.click("#btnEntrar")
 
     # Ya no se reintenta el submit sobre esta misma página: una vez que el
     # portal responde login.php?error=captcha, el Turnstile de esa página

@@ -28,14 +28,13 @@ on:
 
 jobs:
   run:
-    # Se elige por variable de repo (Settings > Variables > PRESENTISMO_RUNNER)
-    # para poder mover el bot a un runner propio SIN tocar el código.
-    #
-    # Por qué importa: medido el 27/08, en el Chrome real del usuario y desde
-    # su IP, Turnstile emite el token solo, invisible, en menos de 8s
-    # (`tokenLen: 773`). Desde los runners de GitHub (rangos de Azure) no lo
-    # emite nunca — ni headless, ni headful con Chrome real y locale es-CL.
-    # La diferencia es la reputación de la IP, no el código.
+    # ubuntu-latest alcanza desde el 14/09/2026: el bot ya no necesita que
+    # Turnstile emita token (que desde los rangos de Azure no pasaba nunca)
+    # ni una cookie de sesión capturada a mano. El propio login.php activa
+    # `cf_fallback=1` si el widget no resuelve en 7s y el servidor acepta el
+    # login así — verificado bloqueando challenges.cloudflare.com.
+    # La variable PRESENTISMO_RUNNER se respeta por si algún día conviene un
+    # runner propio, pero ya no hace falta.
     runs-on: ${{ vars.PRESENTISMO_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 15
     defaults:
@@ -67,25 +66,18 @@ jobs:
         env:
           FRAX_USER: ${{ secrets.FRAX_USER }}
           FRAX_PASS: ${{ secrets.FRAX_PASS }}
-          # La cookie de sesión (si hay una viva) se lee de bot_config en
-          # Supabase con este mismo service role key — no de un secret de
-          # GitHub aparte. Un solo lugar, que también actualiza/lee
-          # presentismo-keepalive. Se genera con
-          # presentismo-sync/scripts/capturar_cookie.py.
+          # Solo para escribir en Supabase (bot_runs + presentismo_registros).
+          # Ya no se lee ninguna cookie de bot_config: sync_login.py loguea
+          # de cero en cada corrida.
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FECHA: ${{ github.event.inputs.fecha }}
           DESDE: ${{ github.event.inputs.desde }}
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            # -screen explícito: xvfb-run por defecto levanta 1280x1024,
-            # mientras el browser arranca --start-maximized creyendo tener
-            # 1920x1080. Con esa diferencia las coordenadas que calcula
-            # scrape.py para el click de xdotool caen fuera de la pantalla
-            # (run 33131225717: el checkbox quedó intacto tras el click).
-            xvfb-run -a --server-args="-screen 0 1920x1080x24" python src/sync.py
+            xvfb-run -a --server-args="-screen 0 1920x1080x24" python src/sync_login.py
           else
-            python src/sync.py
+            python src/sync_login.py
           fi
 
       # Pantallazos de cada paso del flujo (login, index, reportes, export),
