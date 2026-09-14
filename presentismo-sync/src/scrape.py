@@ -715,16 +715,30 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     # parsear el texto de la tabla: es el dato exacto que devuelve el
     # portal y no depende de cómo DataTables redacte su "Mostrando
     # registros del X al Y...".
+    # El portal a veces devuelve api_detalle.php VACÍO (cuerpo en blanco,
+    # no JSON) en vez de rechazar con un código de error — visto en el run
+    # 34909925831. Es un rechazo del lado del servidor, probablemente por
+    # haberlo consultado demasiado seguido, así que la respuesta correcta
+    # es esperar y reintentar, no seguir insistiendo al toque ni quedarse
+    # 90s contando filas en un texto que nunca va a cambiar.
     filas = 0
-    try:
-        with page.expect_response(
-            lambda r: "api_detalle.php" in r.url, timeout=90000
-        ) as info:
-            page.click("#btn-aplicar")
-        filas = int(info.value.json().get("recordsTotal", 0) or 0)
-    except Exception as err:  # noqa: BLE001
-        print(f"No se pudo leer api_detalle.php ({err}); se cae al conteo por texto.")
-        filas = _esperar_datos_reporte(page)
+    for intento_consulta in range(1, 4):
+        try:
+            with page.expect_response(
+                lambda r: "api_detalle.php" in r.url, timeout=60000
+            ) as info:
+                page.click("#btn-aplicar")
+            filas = int(info.value.json().get("recordsTotal", 0) or 0)
+            if filas:
+                break
+            print(f"api_detalle.php respondió 0 filas (intento {intento_consulta}/3).")
+        except Exception as err:  # noqa: BLE001
+            print(f"api_detalle.php no devolvió JSON válido ({err}) — intento {intento_consulta}/3.")
+
+        if intento_consulta < 3:
+            espera = 15000 * intento_consulta  # 15s, 30s
+            print(f"Esperando {espera // 1000}s antes de reconsultar...")
+            page.wait_for_timeout(espera)
 
     # Historia de las descargas "trabadas", para no volver a perseguir la
     # pista equivocada: el síntoma era un timeout esperando el evento
