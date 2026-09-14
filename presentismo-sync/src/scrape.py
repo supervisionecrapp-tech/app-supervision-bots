@@ -259,7 +259,31 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
         try:
             page.wait_for_selector("#usuario", timeout=30000)
             captura(page, "01_login_page")
-            via = _esperar_token_o_fallback(page, segundos=15)
+
+            # El orden importa y antes estaba mal: se salía por el
+            # fallback apenas se armaba (7s), sin darle al captcha la
+            # menor oportunidad. Los pantallazos del run 34865329403 lo
+            # mostraron: el widget había escalado a "Verifique que es un
+            # ser humano" con el checkbox SIN marcar, esperando un click
+            # que nunca llegaba, y el bot enviaba igual. El servidor
+            # entonces contesta "No pudimos verificar tu navegador".
+            #
+            # Ahora se intenta RESOLVERLO de verdad, y el fallback queda
+            # como último recurso:
+            #   1. esperar el token (a veces llega solo, invisible)
+            #   2. si no, clickear el checkbox con un click real de X
+            #   3. volver a esperar el token
+            #   4. recién ahí, fallback
+            via = ""
+            if _esperar_token(page, segundos=20):
+                via = "token"
+            else:
+                captura(page, "01c_checkbox_interactivo")
+                if _click_real_xdotool(page, captura) and _esperar_token(page, segundos=25):
+                    via = "token_tras_click"
+                elif _fallback_armado(page):
+                    via = "fallback"
+
             if not via:
                 captura(page, "01c_sin_token_ni_fallback")
                 print("Ni token ni fallback; se vuelve a fetchear.")
