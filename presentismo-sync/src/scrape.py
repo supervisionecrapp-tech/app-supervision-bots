@@ -201,6 +201,28 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
+def _mover_humano(page, x_destino: float, y_destino: float, *, desde=None) -> tuple[float, float]:
+    """Mueve el cursor en varios pasos chicos con pausas variables.
+
+    Reemplaza al `humanize` de Camoufox, que anima el recorrido pero
+    bloquea de forma síncrona y colgaba corridas enteras. Acá cada
+    `mouse.move` es instantáneo —sigue siendo input real del navegador— y
+    el recorrido humano lo da la interpolación."""
+    x0, y0 = desde if desde else (x_destino - randint(80, 200), y_destino - randint(60, 160))
+    pasos = randint(6, 12)
+    for i in range(1, pasos + 1):
+        avance = i / pasos
+        # Curva suave (ease-out) en vez de lineal, más un jitter chico:
+        # una recta perfecta a velocidad constante no la hace una mano.
+        suave = 1 - (1 - avance) ** 2
+        x = x0 + (x_destino - x0) * suave + uniform(-2.5, 2.5)
+        y = y0 + (y_destino - y0) * suave + uniform(-2.5, 2.5)
+        page.mouse.move(x, y)
+        page.wait_for_timeout(randint(12, 40))
+    page.mouse.move(x_destino, y_destino)
+    return (x_destino, y_destino)
+
+
 def _click_checkbox_camoufox(page, captura) -> bool:
     """Clickea el checkbox de Turnstile con el mouse del propio browser.
 
@@ -231,9 +253,7 @@ def _click_checkbox_camoufox(page, captura) -> bool:
     x = caja["x"] + randint(16, 25)
     y = caja["y"] + caja["h"] * uniform(0.40, 0.60)
     print(f"[camoufox] widget={caja} -> click en ({x:.0f}, {y:.0f})")
-    page.mouse.move(x - randint(40, 90), y + randint(25, 60))
-    page.wait_for_timeout(randint(160, 380))
-    page.mouse.move(x, y)
+    _mover_humano(page, x, y)
     page.wait_for_timeout(randint(120, 300))
     page.mouse.click(x, y)
     page.wait_for_timeout(randint(1200, 2000))
@@ -249,12 +269,18 @@ def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None,
 
     opciones = {
         "headless": False,
-        # Número, no True: `humanize` anima el recorrido del cursor y con
-        # True esa animación no tiene tope — bloquea de forma SÍNCRONA y
-        # colgaba corridas enteras (runs 34903029137 y 34903480494, ambas
-        # congeladas en `page.mouse.move`). Como float es el máximo de
-        # segundos por movimiento, así que acota el peor caso.
-        "humanize": 1.5,
+        # APAGADO. `humanize` anima el recorrido del cursor y esa animación
+        # bloquea de forma SÍNCRONA en Camoufox bajo xvfb: colgó corridas
+        # enteras con True (34903029137, 34903480494) y también acotada a
+        # 1.5s (34907546772, 12m54s congelada en `page.mouse.move`). No es
+        # la duración, es la animación misma.
+        #
+        # El realismo del movimiento lo aporta `_mover_humano`, que
+        # interpola los pasos a mano: sigue siendo input REAL del
+        # navegador (lo que la telemetría necesita) pero no puede colgarse.
+        # Apagarlo no arriesga el login: los logs muestran que se entra por
+        # el fallback del portal, no por el click del checkbox.
+        "humanize": False,
         "geoip": True,
         "locale": "es-CL",
         "os": "windows",
@@ -641,22 +667,24 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
     # por día es en sí misma una firma de bot: ninguna persona mueve el
     # mouse dos veces a las mismas coordenadas exactas en el mismo orden.
     try:
-        x = randint(280, 900)
-        y = randint(180, 520)
+        x = float(randint(280, 900))
+        y = float(randint(180, 520))
         page.mouse.move(x, y)
         page.wait_for_timeout(randint(90, 280))
 
         for _ in range(randint(2, 4)):
-            x = max(60, min(1500, x + randint(-200, 240)))
-            y = max(60, min(820, y + randint(-140, 180)))
-            page.mouse.move(x, y)
+            destino_x = max(60.0, min(1500.0, x + randint(-200, 240)))
+            destino_y = max(60.0, min(820.0, y + randint(-140, 180)))
+            x, y = _mover_humano(page, destino_x, destino_y, desde=(x, y))
             page.wait_for_timeout(randint(80, 320))
 
         page.evaluate(f"() => window.scrollBy(0, {randint(160, 400)})")
         page.wait_for_timeout(randint(150, 450))
-        page.mouse.move(
-            max(60, min(1500, x + randint(-120, 160))),
-            max(60, min(820, y + randint(-90, 120))),
+        x, y = _mover_humano(
+            page,
+            max(60.0, min(1500.0, x + randint(-120, 160))),
+            max(60.0, min(820.0, y + randint(-90, 120))),
+            desde=(x, y),
         )
         page.wait_for_timeout(randint(100, 300))
         page.evaluate(f"() => window.scrollBy(0, -{randint(120, 360)})")
