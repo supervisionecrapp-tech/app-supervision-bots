@@ -594,6 +594,46 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     _exportar(page, captura, downloaded_path, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir)
 
 
+def _marcar_sesion_humana(page, captura=None) -> bool:
+    """Genera interacción real para que el portal marque la sesión como
+    "humana". SIN esto los endpoints de datos devuelven 200 pero vacíos.
+
+    No es una suposición: `js/human.js` del propio portal lo explica en su
+    cabecera — "detecta la PRIMERA interaccion humana real de la sesion y
+    la reporta al servidor (api_interaccion.php). El server marca la
+    sesion como 'hay un humano'. Los endpoints de datos exigen esa marca
+    (anti-bot). Un bot que hace requests sin mover el mouse / scrollear /
+    teclear nunca dispara esto -> su sesion queda sin marca."
+
+    Los eventos que la disparan son mousemove, mousedown, keydown, scroll,
+    touchstart, wheel y pointerdown. El bot navegaba con `goto` y llenaba
+    con `fill()`, que no dispara ninguno: por eso el reporte quedaba en
+    "Ningún dato disponible" con las tarjetas girando para siempre.
+
+    Se espera la respuesta de `api_interaccion.php` para no correr una
+    carrera entre la marca y la primera request de datos."""
+    try:
+        with page.expect_response(
+            lambda r: "api_interaccion.php" in r.url, timeout=20000
+        ):
+            page.mouse.move(420, 300)
+            page.wait_for_timeout(150)
+            page.mouse.move(660, 430)
+            page.wait_for_timeout(150)
+            page.mouse.wheel(0, 240)
+            page.wait_for_timeout(150)
+            page.mouse.move(700, 520)
+            page.wait_for_timeout(150)
+            page.mouse.wheel(0, -240)
+        print("Sesión marcada como humana (api_interaccion.php respondió).")
+        return True
+    except Exception as err:  # noqa: BLE001
+        # `sendBeacon` puede no exponer la respuesta; si ya se había
+        # marcado antes, tampoco vuelve a pegarle. No es fatal.
+        print(f"No se confirmó la marca humana ({err}); se sigue igual.")
+        return False
+
+
 def _esperar_datos_reporte(page, *, segundos: int = 90) -> int:
     """Espera a que las tablas del reporte terminen de cargar por AJAX y
     devuelve cuántos registros trajeron (0 = nunca cargaron).
@@ -650,21 +690,40 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
         raise
     captura(page, "05_reportes_ok")
 
+    # ANTES de pedir datos: marcar la sesión como humana. El portal
+    # exige esa marca en sus endpoints de datos (ver _marcar_sesion_humana).
+    _marcar_sesion_humana(page, captura)
+
     # Inputs type=date nativos (value YYYY-MM-DD) — sin overlay de
     # calendario que cerrar. "hasta" (#f-ff) se deja tal cual lo trae
     # el portal por default (hoy), a pedido explícito: no se toca.
     page.fill("#f-fi", fecha_fi.isoformat())
-    page.click("#btn-aplicar")
 
-    # La tabla "Detalle de marcas" se recarga vía AJAX (DataTables
-    # server-side). Antes acá había un wait_for_timeout(3000) a ciegas y
-    # esa era la causa real de las descargas "trabadas": cuando el AJAX
-    # tardaba más de 3s se clickeaba "Exportar" con la tabla en "Ningún
-    # dato disponible" y las tarjetas todavía girando. Sin datos el portal
-    # no genera archivo, así que el evento `download` no llegaba nunca —
-    # subir su timeout no ayudaba (run 34893170193: 180s y la misma falla).
-    filas = _esperar_datos_reporte(page)
+    # Se lee `recordsTotal` de la respuesta de api_detalle.php en vez de
+    # parsear el texto de la tabla: es el dato exacto que devuelve el
+    # portal y no depende de cómo DataTables redacte su "Mostrando
+    # registros del X al Y...".
+    filas = 0
+    try:
+        with page.expect_response(
+            lambda r: "api_detalle.php" in r.url, timeout=90000
+        ) as info:
+            page.click("#btn-aplicar")
+        filas = int(info.value.json().get("recordsTotal", 0) or 0)
+    except Exception as err:  # noqa: BLE001
+        print(f"No se pudo leer api_detalle.php ({err}); se cae al conteo por texto.")
+        filas = _esperar_datos_reporte(page)
+
+    # Historia de las descargas "trabadas", para no volver a perseguir la
+    # pista equivocada: el síntoma era un timeout esperando el evento
+    # `download`, pero el portal simplemente no generaba archivo porque el
+    # reporte venía VACÍO ("Ningún dato disponible", tarjetas girando).
+    # Subir el timeout a 180s no cambió nada (run 34893170193). La causa
+    # de fondo es el gate anti-bot de `_marcar_sesion_humana`: sin la
+    # marca, api_kpi/api_detalle responden 200 pero sin datos.
     print(f"Reporte cargado con {filas} registros.")
+    # Un respiro para que DataTables termine de pintar antes del export.
+    page.wait_for_timeout(1200)
     captura(page, "06_antes_exportar")
     if not filas:
         captura(page, "06b_reporte_vacio")
