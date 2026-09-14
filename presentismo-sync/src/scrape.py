@@ -229,6 +229,10 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     screenshots_dir = download_dir / "screenshots"
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
+    # Nº de tirada, para que los pantallazos del artifact se puedan
+    # atribuir a un intento concreto en vez de mezclarse todos.
+    intento = {"n": 0}
+
     def captura(page, paso: str) -> None:
         """Pantallazo de diagnóstico best-effort (nunca rompe el flujo si
         falla, ej. página ya cerrada) — para poder ver en qué paso exacto
@@ -237,7 +241,14 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
         mirar la pantalla en vivo."""
         try:
             ts = dt.datetime.now(dt.timezone.utc).strftime("%H%M%S")
-            page.screenshot(path=str(screenshots_dir / f"{ts}_{paso}.png"), full_page=True)
+            # full_page=False y timeout corto a propósito: con full_page
+            # las capturas se colgaban los 90s del timeout de sesión
+            # ("Timeout 90000ms exceeded ... waiting for fonts to load")
+            # y varias corridas terminaban sin ninguna evidencia. El
+            # viewport alcanza para ver el login y el estado del captcha.
+            nombre = f"{ts}_t{intento['n']}_{paso}.png"
+            page.screenshot(path=str(screenshots_dir / nombre), full_page=False, timeout=15000)
+            print(f"[captura] {nombre}")
         except Exception as err:  # noqa: BLE001
             print(f"No se pudo capturar pantallazo ({paso}): {err}")
 
@@ -254,6 +265,7 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
                 print("Ni token ni fallback; se vuelve a fetchear.")
                 return page
             print(f"Login habilitado por: {via}.")
+            captura(page, f"01d_captcha_ok_por_{via}")
             _interactuar_paso(page, captura, downloaded_path, frax_user=frax_user, frax_pass=frax_pass, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir)
         except Exception:
             captura(page, "error_fatal")
@@ -384,12 +396,15 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
         # (trackers/pixels de terceros que nunca terminan de cargar).
         network_idle=False,
     ) as session:
-        # 2 tiradas, no 6: ya no se está tirando los dados contra un
-        # challenge. Si el fallback no entra en dos intentos, el problema
-        # es otro y conviene fallar rápido.
-        for vuelta in range(1, 3):
-            print(f"--- Tirada {vuelta}/2 ---")
-            session.fetch(f"{BASE_URL}/login.php", page_action=interactuar)
+        for vuelta in range(1, 6):
+            intento["n"] = vuelta
+            print(f"--- Tirada {vuelta}/5 ---")
+            try:
+                session.fetch(f"{BASE_URL}/login.php", page_action=interactuar)
+            except Exception as err:  # noqa: BLE001
+                # Que una tirada falle no debe cortar las que siguen: el
+                # objetivo es juntar evidencia de los 5 intentos.
+                print(f"Tirada {vuelta} falló: {err}")
             if "path" in downloaded_path:
                 print(f"Listo en la tirada {vuelta}.")
                 break
@@ -426,6 +441,11 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # habilitado evita clickear al vacío.
     page.wait_for_selector("#btnEntrar:not([disabled])", timeout=20000)
     page.click("#btnEntrar")
+    # Justo después del POST, antes de esperar la navegación: es el
+    # pantallazo que muestra qué contesta el portal (el aviso de captcha,
+    # un mensaje de error, etc.).
+    page.wait_for_timeout(2500)
+    captura(page, "02_despues_de_enviar")
 
     # Ya no se reintenta el submit sobre esta misma página: una vez que el
     # portal responde login.php?error=captcha, el Turnstile de esa página
