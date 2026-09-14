@@ -335,16 +335,23 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
             raise RuntimeError("El flujo terminó sin descargar el archivo (vía cookie).")
         return downloaded_path["path"]
 
-    # Fallback: login normal. `StealthySession` en vez de `StealthyFetcher.fetch`: hace falta poder
-    # RE-FETCHEAR, porque el solver de Cloudflare corre una vez por fetch y
-    # es lo único que alguna vez ganó el challenge desde esta IP.
+    # Login normal, sin solver de Cloudflare.
     #
-    # El run 33133022451 lo dejó claro: recargar con `page.reload()` 12
-    # veces no trajo ni un token, porque la recarga no vuelve a invocar al
-    # solver. En cambio en el run 33132206620 el solver tardó 90s, resolvió
-    # de verdad, y la corrida terminó bien (325 marcaciones). Con la sesión
-    # abierta cada `fetch` es una tirada nueva CON solver, reusando el mismo
-    # browser (y sus cookies de Cloudflare) en vez de relanzarlo.
+    # `solve_cloudflare=False` es DELIBERADO y es lo que hace que esto
+    # funcione desde los runners de GitHub. Con el solver activo (run
+    # 34849229804) el log muestra el patrón exacto del problema:
+    #     INFO: Cloudflare captcha is solved
+    #     ERROR: quedó en login.php?error=captcha
+    # El solver inyecta un token que el servidor después rechaza, pero el
+    # JS del sitio ya lo dio por bueno (`onCfOk` -> resuelto = true), así
+    # que el fallback del portal NUNCA se arma y el POST viaja con un
+    # token inválido. El solver se sabotea a sí mismo.
+    #
+    # Sin solver, cada entorno toma su camino natural:
+    #   - IP residencial: Turnstile resuelve solo -> vía "token".
+    #   - IP de datacenter: no resuelve, el sitio arma cf_fallback=1 a los
+    #     7s -> vía "fallback", que el servidor acepta (ver
+    #     `_fallback_armado`).
     with StealthySession(
         # Headful bajo xvfb (ver el workflow) en vez de headless: Cloudflare
         # detecta Chrome headless con bastante fiabilidad.
@@ -357,17 +364,18 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
         # los "timezone mismatch attacks" entre lo que parchea).
         locale="es-CL",
         timezone_id="America/Santiago",
-        solve_cloudflare=True,
-        # La doc de StealthyFetcher pide timeout >= 60s con el solver activo.
-        # Se le da más margen todavía: la tirada que ganó necesitó 90s.
-        timeout=150000,
+        solve_cloudflare=False,
+        timeout=90000,
         # Los waits explícitos ya cubren cada paso — esperar además a
         # "networkidle" en cada navegación solo suma tiempo muerto
         # (trackers/pixels de terceros que nunca terminan de cargar).
         network_idle=False,
     ) as session:
-        for vuelta in range(1, 7):
-            print(f"--- Tirada {vuelta}/6 (fetch con solver de Cloudflare) ---")
+        # 2 tiradas, no 6: ya no se está tirando los dados contra un
+        # challenge. Si el fallback no entra en dos intentos, el problema
+        # es otro y conviene fallar rápido.
+        for vuelta in range(1, 3):
+            print(f"--- Tirada {vuelta}/2 ---")
             session.fetch(f"{BASE_URL}/login.php", page_action=interactuar)
             if "path" in downloaded_path:
                 print(f"Listo en la tirada {vuelta}.")
