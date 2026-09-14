@@ -225,15 +225,18 @@ def _click_checkbox_camoufox(page, captura) -> bool:
         print("No se encontró el widget .cf-turnstile.")
         return False
 
-    x = caja["x"] + 20
-    y = caja["y"] + caja["h"] * 0.5
+    # Offsets y tiempos aleatorios dentro del checkbox: clickear siempre
+    # el mismo píxel exacto, con el mismo recorrido y el mismo timing, es
+    # de las señales más baratas de detectar.
+    x = caja["x"] + randint(16, 25)
+    y = caja["y"] + caja["h"] * uniform(0.40, 0.60)
     print(f"[camoufox] widget={caja} -> click en ({x:.0f}, {y:.0f})")
-    page.mouse.move(x - 60, y + 40)
-    page.wait_for_timeout(250)
+    page.mouse.move(x - randint(40, 90), y + randint(25, 60))
+    page.wait_for_timeout(randint(160, 380))
     page.mouse.move(x, y)
-    page.wait_for_timeout(200)
+    page.wait_for_timeout(randint(120, 300))
     page.mouse.click(x, y)
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(randint(1200, 2000))
     captura(page, "01d_click_camoufox")
     return True
 
@@ -633,12 +636,30 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
     #     humanize=1.5, que acota cada movimiento.
     # Y los gestos van FUERA de cualquier `expect_response`: si bloquean
     # dentro del `with`, su timeout ni siquiera llega a evaluarse.
+    # TODO lo de acá va aleatorizado a propósito. Una secuencia fija
+    # —mismos píxeles, mismo scroll, mismos milisegundos— repetida 4 veces
+    # por día es en sí misma una firma de bot: ninguna persona mueve el
+    # mouse dos veces a las mismas coordenadas exactas en el mismo orden.
     try:
-        page.mouse.move(420, 300)
-        page.mouse.move(660, 430)
-        page.evaluate("() => window.scrollBy(0, 240)")
-        page.mouse.move(700, 520)
-        page.evaluate("() => window.scrollBy(0, -240)")
+        x = randint(280, 900)
+        y = randint(180, 520)
+        page.mouse.move(x, y)
+        page.wait_for_timeout(randint(90, 280))
+
+        for _ in range(randint(2, 4)):
+            x = max(60, min(1500, x + randint(-200, 240)))
+            y = max(60, min(820, y + randint(-140, 180)))
+            page.mouse.move(x, y)
+            page.wait_for_timeout(randint(80, 320))
+
+        page.evaluate(f"() => window.scrollBy(0, {randint(160, 400)})")
+        page.wait_for_timeout(randint(150, 450))
+        page.mouse.move(
+            max(60, min(1500, x + randint(-120, 160))),
+            max(60, min(820, y + randint(-90, 120))),
+        )
+        page.wait_for_timeout(randint(100, 300))
+        page.evaluate(f"() => window.scrollBy(0, -{randint(120, 360)})")
     except Exception as err:  # noqa: BLE001
         print(f"Falló algún gesto de la marca humana: {err}")
         return False
@@ -646,7 +667,7 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
     # Margen para que salga el beacon a api_interaccion.php. No se usa
     # expect_response a propósito (ver arriba); si la marca no prendió,
     # el chequeo de `filas` más abajo lo va a cazar igual.
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(randint(1500, 2600))
     print("Gestos de interacción humana enviados.")
     return True
 
