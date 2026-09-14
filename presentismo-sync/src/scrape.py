@@ -201,66 +201,6 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
-def _mover_humano(page, x_destino: float, y_destino: float, *, desde=None) -> tuple[float, float]:
-    """Mueve el cursor en varios pasos chicos con pausas variables.
-
-    Reemplaza al `humanize` de Camoufox, que anima el recorrido pero
-    bloquea de forma síncrona y colgaba corridas enteras. Acá cada
-    `mouse.move` es instantáneo —sigue siendo input real del navegador— y
-    el recorrido humano lo da la interpolación."""
-    x0, y0 = desde if desde else (x_destino - randint(80, 200), y_destino - randint(60, 160))
-    pasos = randint(6, 12)
-    for i in range(1, pasos + 1):
-        avance = i / pasos
-        # Curva suave (ease-out) en vez de lineal, más un jitter chico:
-        # una recta perfecta a velocidad constante no la hace una mano.
-        suave = 1 - (1 - avance) ** 2
-        x = x0 + (x_destino - x0) * suave + uniform(-2.5, 2.5)
-        y = y0 + (y_destino - y0) * suave + uniform(-2.5, 2.5)
-        page.mouse.move(x, y)
-        page.wait_for_timeout(randint(12, 40))
-    page.mouse.move(x_destino, y_destino)
-    return (x_destino, y_destino)
-
-
-def _click_checkbox_camoufox(page, captura) -> bool:
-    """Clickea el checkbox de Turnstile con el mouse del propio browser.
-
-    En Camoufox no hace falta xdotool: Firefox se maneja por Juggler, no
-    por CDP, así que `page.mouse` no deja el rastro que Turnstile detecta
-    en Chromium, y con `humanize=True` el recorrido del cursor lo genera
-    el browser de forma humana.
-
-    El checkbox va pegado al borde izquierdo del widget, ~20px adentro
-    (medido sobre los pantallazos del run 34869715526 — el click viejo
-    apuntaba a 28-33px, que caía en el borde o afuera)."""
-    caja = page.evaluate(
-        """() => {
-            const d = document.querySelector('.cf-turnstile');
-            if (!d) return null;
-            const r = d.getBoundingClientRect();
-            if (!r.width || !r.height) return null;
-            return {x: r.x, y: r.y, w: r.width, h: r.height};
-        }"""
-    )
-    if not caja:
-        print("No se encontró el widget .cf-turnstile.")
-        return False
-
-    # Offsets y tiempos aleatorios dentro del checkbox: clickear siempre
-    # el mismo píxel exacto, con el mismo recorrido y el mismo timing, es
-    # de las señales más baratas de detectar.
-    x = caja["x"] + randint(16, 25)
-    y = caja["y"] + caja["h"] * uniform(0.40, 0.60)
-    print(f"[camoufox] widget={caja} -> click en ({x:.0f}, {y:.0f})")
-    _mover_humano(page, x, y)
-    page.wait_for_timeout(randint(120, 300))
-    page.mouse.click(x, y)
-    page.wait_for_timeout(randint(1200, 2000))
-    captura(page, "01d_click_camoufox")
-    return True
-
-
 def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None, vueltas: int) -> None:
     """Corre el login con Camoufox (Firefox endurecido) en vez de
     Chromium. Entrega una `page` de Playwright normal, así que todo el
@@ -269,17 +209,12 @@ def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None,
 
     opciones = {
         "headless": False,
-        # APAGADO. `humanize` anima el recorrido del cursor y esa animación
-        # bloquea de forma SÍNCRONA en Camoufox bajo xvfb: colgó corridas
-        # enteras con True (34903029137, 34903480494) y también acotada a
-        # 1.5s (34907546772, 12m54s congelada en `page.mouse.move`). No es
-        # la duración, es la animación misma.
-        #
-        # El realismo del movimiento lo aporta `_mover_humano`, que
-        # interpola los pasos a mano: sigue siendo input REAL del
-        # navegador (lo que la telemetría necesita) pero no puede colgarse.
-        # Apagarlo no arriesga el login: los logs muestran que se entra por
-        # el fallback del portal, no por el click del checkbox.
+        # APAGADO, junto con todo uso de `page.mouse` en este camino. Esa
+        # API se cuelga de forma intermitente en Camoufox bajo xvfb y no
+        # es cuestión de la animación: colgó con humanize=True
+        # (34903029137, 34903480494), acotada a 1.5s (34907546772, 12m54s)
+        # y también con humanize=False (34909061566). Los gestos ahora se
+        # despachan desde la página (ver `_marcar_sesion_humana`).
         "humanize": False,
         "geoip": True,
         "locale": "es-CL",
@@ -399,12 +334,17 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
                 via = "token"
             else:
                 captura(page, "01c_checkbox_interactivo")
-                clickear = (
-                    _click_checkbox_camoufox
-                    if os.environ.get("MOTOR", "").lower() == "camoufox"
-                    else _click_real_xdotool
-                )
-                if clickear(page, captura) and _esperar_token(page, segundos=25):
+                if os.environ.get("MOTOR", "").lower() == "camoufox":
+                    # En Camoufox NO se clickea el checkbox: `page.mouse`
+                    # se cuelga de forma intermitente bajo xvfb, y el
+                    # click nunca aportó nada — en todas las corridas que
+                    # entraron, la vía fue el fallback del portal, no el
+                    # token. Se espera el fallback y listo.
+                    if _esperar_token(page, segundos=20):
+                        via = "token"
+                    elif _fallback_armado(page):
+                        via = "fallback"
+                elif _click_real_xdotool(page, captura) and _esperar_token(page, segundos=25):
                     via = "token_tras_click"
                 elif _fallback_armado(page):
                     via = "fallback"
@@ -646,48 +586,52 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
 
     Se espera la respuesta de `api_interaccion.php` para no correr una
     carrera entre la marca y la primera request de datos."""
-    # Tiene que ser input REAL del navegador (`page.mouse`), no
-    # `dispatchEvent` desde la página: probado el 14/09, con eventos
-    # sintéticos el reporte vuelve a venir en 0 desde el runner, aunque
-    # api_interaccion.php responda igual. Localmente los sintéticos
-    # alcanzan, pero el runner arranca con peor score y ahí la telemetría
-    # de Cloudflare —que lee el input a nivel del motor, donde un
-    # dispatchEvent no pasa— parece pesar.
+    # Los gestos se despachan desde la página (`dispatchEvent`), NO con
+    # `page.mouse`: esa API se cuelga de forma intermitente en Camoufox
+    # bajo xvfb y NO es cuestión de `humanize` — colgó con True
+    # (34903029137, 34903480494), acotada a 1.5s (34907546772) y también
+    # con humanize=False (34909061566). Un `evaluate` no puede bloquearse
+    # así.
     #
-    # Lo que SÍ hay que evitar es que esos gestos puedan colgarse:
-    #   - `mouse.wheel` no retorna nunca en Firefox bajo xvfb
-    #     (run 34901770057) -> se usa window.scrollBy para el 'scroll'.
-    #   - `mouse.move` con humanize=True tampoco tiene tope
-    #     (runs 34903029137/34903480494) -> el motor ahora usa
-    #     humanize=1.5, que acota cada movimiento.
-    # Y los gestos van FUERA de cualquier `expect_response`: si bloquean
-    # dentro del `with`, su timeout ni siquiera llega a evaluarse.
-    # TODO lo de acá va aleatorizado a propósito. Una secuencia fija
-    # —mismos píxeles, mismo scroll, mismos milisegundos— repetida 4 veces
-    # por día es en sí misma una firma de bot: ninguna persona mueve el
-    # mouse dos veces a las mismas coordenadas exactas en el mismo orden.
+    # El recorrido va igual de aleatorizado (puntos, cantidad de pasos,
+    # esperas y scroll), porque una secuencia fija repetida 4 veces al día
+    # es en sí misma una firma de bot.
     try:
-        x = float(randint(280, 900))
-        y = float(randint(180, 520))
-        page.mouse.move(x, y)
-        page.wait_for_timeout(randint(90, 280))
-
-        for _ in range(randint(2, 4)):
-            destino_x = max(60.0, min(1500.0, x + randint(-200, 240)))
-            destino_y = max(60.0, min(820.0, y + randint(-140, 180)))
-            x, y = _mover_humano(page, destino_x, destino_y, desde=(x, y))
-            page.wait_for_timeout(randint(80, 320))
+        x = randint(280, 900)
+        y = randint(180, 520)
+        for paso in range(randint(3, 5)):
+            destino_x = max(60, min(1500, x + randint(-220, 260)))
+            destino_y = max(60, min(820, y + randint(-160, 200)))
+            page.evaluate(
+                """([x0, y0, x1, y1]) => {
+                    const n = 8 + Math.floor(Math.random() * 6);
+                    for (let i = 1; i <= n; i++) {
+                        const t = 1 - Math.pow(1 - i / n, 2);
+                        window.dispatchEvent(new MouseEvent('mousemove', {
+                            bubbles: true,
+                            clientX: x0 + (x1 - x0) * t + (Math.random() * 5 - 2.5),
+                            clientY: y0 + (y1 - y0) * t + (Math.random() * 5 - 2.5),
+                        }));
+                    }
+                }""",
+                [x, y, destino_x, destino_y],
+            )
+            x, y = destino_x, destino_y
+            print(f"  gesto {paso + 1}: mousemove -> ({x}, {y})")
+            page.wait_for_timeout(randint(90, 320))
 
         page.evaluate(f"() => window.scrollBy(0, {randint(160, 400)})")
+        print("  gesto: scroll abajo")
         page.wait_for_timeout(randint(150, 450))
-        x, y = _mover_humano(
-            page,
-            max(60.0, min(1500.0, x + randint(-120, 160))),
-            max(60.0, min(820.0, y + randint(-90, 120))),
-            desde=(x, y),
+        page.evaluate(
+            f"""() => window.dispatchEvent(new MouseEvent('mousedown', {{
+                bubbles: true, clientX: {x}, clientY: {y}
+            }}))"""
         )
+        print("  gesto: mousedown")
         page.wait_for_timeout(randint(100, 300))
         page.evaluate(f"() => window.scrollBy(0, -{randint(120, 360)})")
+        print("  gesto: scroll arriba")
     except Exception as err:  # noqa: BLE001
         print(f"Falló algún gesto de la marca humana: {err}")
         return False
