@@ -594,6 +594,39 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     _exportar(page, captura, downloaded_path, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir)
 
 
+def _esperar_datos_reporte(page, *, segundos: int = 90) -> int:
+    """Espera a que las tablas del reporte terminen de cargar por AJAX y
+    devuelve cuántos registros trajeron (0 = nunca cargaron).
+
+    DataTables escribe "Mostrando registros del X al Y de un total de N
+    registros" debajo de cada tabla; mientras el AJAX corre, N es 0 y la
+    tabla dice "Ningún dato disponible en esta tabla". Se toma el N más
+    grande de la página (hay dos tablas: "Resumen por local" y "Detalle de
+    marcas") y se espera a que sea > 0."""
+    leer_total = """() => {
+        const txt = document.body.innerText || '';
+        const re = /de un total de\\s+([\\d.,]+)\\s+registros/g;
+        let m, max = 0;
+        while ((m = re.exec(txt)) !== null) {
+            const n = parseInt(m[1].replace(/[.,]/g, ''), 10);
+            if (!isNaN(n) && n > max) max = n;
+        }
+        return max;
+    }"""
+    for _ in range(segundos * 2):
+        try:
+            total = page.evaluate(leer_total)
+        except Exception:  # noqa: BLE001
+            total = 0
+        if total > 0:
+            # Un respiro para que el DOM de la tabla termine de pintarse
+            # antes de pedir el export.
+            page.wait_for_timeout(800)
+            return total
+        page.wait_for_timeout(500)
+    return 0
+
+
 def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt.date, download_dir: Path) -> None:
     """Todo lo que va DESPUÉS de tener sesión abierta: filtrar el rango y
     bajar el Excel. Separado del login porque con `FRAX_SESSION_COOKIE` se
@@ -624,9 +657,21 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     page.click("#btn-aplicar")
 
     # La tabla "Detalle de marcas" se recarga vía AJAX (DataTables
-    # server-side) — no hay selector confiable de "listo".
-    page.wait_for_timeout(3000)
+    # server-side). Antes acá había un wait_for_timeout(3000) a ciegas y
+    # esa era la causa real de las descargas "trabadas": cuando el AJAX
+    # tardaba más de 3s se clickeaba "Exportar" con la tabla en "Ningún
+    # dato disponible" y las tarjetas todavía girando. Sin datos el portal
+    # no genera archivo, así que el evento `download` no llegaba nunca —
+    # subir su timeout no ayudaba (run 34893170193: 180s y la misma falla).
+    filas = _esperar_datos_reporte(page)
+    print(f"Reporte cargado con {filas} registros.")
     captura(page, "06_antes_exportar")
+    if not filas:
+        captura(page, "06b_reporte_vacio")
+        raise RuntimeError(
+            "El reporte quedó en 0 registros; no tiene sentido exportar "
+            "(o el rango no tiene marcas, o el AJAX nunca terminó)."
+        )
 
     file_path = download_dir / f"presentismo-{fecha_fi.isoformat()}_{fecha_ff.isoformat()}.xlsx"
     try:
