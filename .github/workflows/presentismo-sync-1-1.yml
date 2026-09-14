@@ -70,6 +70,12 @@ jobs:
           # Ya no se lee ninguna cookie de bot_config: sync_login.py loguea
           # de cero en cada corrida.
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Proxy RESIDENCIAL (http://user:pass@host:puerto). Sin esto el
+          # login se rechaza con login.php?error=captcha desde la IP del
+          # runner: el portal acepta su propio fallback solo desde IPs de
+          # buena reputación (verificado el 14/09/2026). Si el secret no
+          # está cargado, el bot sale directo y el login va a fallar.
+          FRAX_PROXY: ${{ secrets.FRAX_PROXY }}
           FECHA: ${{ github.event.inputs.fecha }}
           DESDE: ${{ github.event.inputs.desde }}
         shell: bash

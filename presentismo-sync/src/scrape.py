@@ -201,7 +201,7 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
-def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None, cf_clearance: str | None = None, fecha_fi: dt.date | None = None) -> Path:
+def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None, cf_clearance: str | None = None, fecha_fi: dt.date | None = None, proxy: str | None = None) -> Path:
     """Loguea, filtra el rango de fechas y descarga el Excel de "Detalle de
     marcas". `fecha_ff` es la fecha que queda en el campo "hasta" (se deja
     tal cual la trae el portal si no se toca; acá se pasa explícita para
@@ -212,7 +212,16 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     Marcas").
 
     `session_cookie`: si se pasa (viene de `bot_config` en Supabase, ver
-    `sync.py`), se entra por sesión ya abierta y no se toca el login."""
+    `sync.py`), se entra por sesión ya abierta y no se toca el login.
+
+    `proxy`: URL de proxy (formato `http://user:pass@host:puerto`). Hace
+    falta uno RESIDENCIAL para que el login funcione desde GitHub Actions:
+    medido el 14/09/2026, el portal acepta el login por `cf_fallback=1`
+    desde una IP residencial y lo rechaza (`login.php?error=captcha`)
+    desde la IP del runner. Se descartó que fuera por `fp_sig`: inyectando
+    a mano las señales de automatización del runner (`webgl_sw,no_plugins`)
+    el login desde IP residencial entra igual. Lo único que cambia es la
+    reputación de la IP."""
     download_dir.mkdir(parents=True, exist_ok=True)
     if fecha_fi is None:
         fecha_fi = fecha_ff - dt.timedelta(days=1)
@@ -365,6 +374,10 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
         locale="es-CL",
         timezone_id="America/Santiago",
         solve_cloudflare=False,
+        # Sin proxy residencial el login se rechaza desde Actions (ver el
+        # docstring). `None` = salida directa, que sirve corriendo a mano
+        # desde una máquina con IP normal.
+        proxy=proxy or None,
         timeout=90000,
         # Los waits explícitos ya cubren cada paso — esperar además a
         # "networkidle" en cada navegación solo suma tiempo muerto

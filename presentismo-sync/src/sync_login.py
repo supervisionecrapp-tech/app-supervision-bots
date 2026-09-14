@@ -126,6 +126,7 @@ def main() -> None:
             file_path = scrape_presentismo_export(
                 fecha_ff=fecha, fecha_fi=desde, frax_user=frax_user, frax_pass=frax_pass,
                 download_dir=download_dir, session_cookie=None, cf_clearance=None,
+                proxy=os.environ.get("FRAX_PROXY"),
             )
             print(f"Archivo descargado: {file_path}")
             return upload_presentismo_file(
