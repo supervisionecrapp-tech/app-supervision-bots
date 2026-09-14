@@ -25,6 +25,12 @@ on:
         description: "Fecha 'desde' (YYYY-MM-DD, opcional). Vacío = el día anterior a 'hasta' (comportamiento normal). Para backfills de varios días."
         required: false
         type: string
+      motor:
+        description: "Motor del login: camoufox (Firefox endurecido) o scrapling (Chromium)."
+        required: false
+        default: camoufox
+        type: choice
+        options: [camoufox, scrapling]
 
 jobs:
   run:
@@ -53,6 +59,14 @@ jobs:
       # `playwright install` en los otros bots de este repo.
       - run: scrapling install
 
+      # Camoufox (Firefox endurecido contra fingerprinting) para
+      # MOTOR=camoufox. `fetch` baja el build del browser, que no viene en
+      # el paquete de pip.
+      - name: Instalar Camoufox
+        run: |
+          pip install "camoufox[geoip]"
+          python -m camoufox fetch
+
       # El scrape corre HEADFUL (headless=False) porque Cloudflare detecta
       # Chrome headless. En Linux eso necesita un display: xvfb se lo da
       # virtual. En un runner propio de Windows/macOS ya hay uno real.
@@ -76,14 +90,17 @@ jobs:
           # buena reputación (verificado el 14/09/2026). Si el secret no
           # está cargado, el bot sale directo y el login va a fallar.
           FRAX_PROXY: ${{ secrets.FRAX_PROXY }}
+          # Motor del login: "camoufox" (Firefox endurecido, sin CDP) o
+          # vacío para el StealthySession de Scrapling (Chromium).
+          MOTOR: ${{ github.event.inputs.motor || 'camoufox' }}
           FECHA: ${{ github.event.inputs.fecha }}
           DESDE: ${{ github.event.inputs.desde }}
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a --server-args="-screen 0 1920x1080x24" python src/sync_login.py
+            xvfb-run -a --server-args="-screen 0 1920x1080x24" python -u src/sync_login.py
           else
-            python src/sync_login.py
+            python -u src/sync_login.py
           fi
 
       # Pantallazos de cada paso del flujo (login, index, reportes, export),

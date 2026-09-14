@@ -201,6 +201,79 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
+def _click_checkbox_camoufox(page, captura) -> bool:
+    """Clickea el checkbox de Turnstile con el mouse del propio browser.
+
+    En Camoufox no hace falta xdotool: Firefox se maneja por Juggler, no
+    por CDP, así que `page.mouse` no deja el rastro que Turnstile detecta
+    en Chromium, y con `humanize=True` el recorrido del cursor lo genera
+    el browser de forma humana.
+
+    El checkbox va pegado al borde izquierdo del widget, ~20px adentro
+    (medido sobre los pantallazos del run 34869715526 — el click viejo
+    apuntaba a 28-33px, que caía en el borde o afuera)."""
+    caja = page.evaluate(
+        """() => {
+            const d = document.querySelector('.cf-turnstile');
+            if (!d) return null;
+            const r = d.getBoundingClientRect();
+            if (!r.width || !r.height) return null;
+            return {x: r.x, y: r.y, w: r.width, h: r.height};
+        }"""
+    )
+    if not caja:
+        print("No se encontró el widget .cf-turnstile.")
+        return False
+
+    x = caja["x"] + 20
+    y = caja["y"] + caja["h"] * 0.5
+    print(f"[camoufox] widget={caja} -> click en ({x:.0f}, {y:.0f})")
+    page.mouse.move(x - 60, y + 40)
+    page.wait_for_timeout(250)
+    page.mouse.move(x, y)
+    page.wait_for_timeout(200)
+    page.mouse.click(x, y)
+    page.wait_for_timeout(1500)
+    captura(page, "01d_click_camoufox")
+    return True
+
+
+def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None, vueltas: int) -> None:
+    """Corre el login con Camoufox (Firefox endurecido) en vez de
+    Chromium. Entrega una `page` de Playwright normal, así que todo el
+    resto del flujo (`_interactuar_paso`, `_exportar`) se reusa igual."""
+    from camoufox.sync_api import Camoufox
+
+    opciones = {
+        "headless": False,
+        "humanize": True,
+        "geoip": True,
+        "locale": "es-CL",
+        "os": "windows",
+    }
+    if proxy:
+        opciones["proxy"] = {"server": proxy}
+
+    with Camoufox(**opciones) as browser:
+        for vuelta in range(1, vueltas + 1):
+            intento["n"] = vuelta
+            print(f"--- Tirada {vuelta}/{vueltas} (camoufox) ---")
+            page = browser.new_page()
+            try:
+                page.goto(f"{BASE_URL}/login.php", timeout=90000)
+                interactuar(page)
+            except Exception as err:  # noqa: BLE001
+                print(f"Tirada {vuelta} falló: {err}")
+            finally:
+                try:
+                    page.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            if "path" in downloaded_path:
+                print(f"Listo en la tirada {vuelta}.")
+                break
+
+
 def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None, cf_clearance: str | None = None, fecha_fi: dt.date | None = None, proxy: str | None = None) -> Path:
     """Loguea, filtra el rango de fechas y descarga el Excel de "Detalle de
     marcas". `fecha_ff` es la fecha que queda en el campo "hasta" (se deja
@@ -279,7 +352,12 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
                 via = "token"
             else:
                 captura(page, "01c_checkbox_interactivo")
-                if _click_real_xdotool(page, captura) and _esperar_token(page, segundos=25):
+                clickear = (
+                    _click_checkbox_camoufox
+                    if os.environ.get("MOTOR", "").lower() == "camoufox"
+                    else _click_real_xdotool
+                )
+                if clickear(page, captura) and _esperar_token(page, segundos=25):
                     via = "token_tras_click"
                 elif _fallback_armado(page):
                     via = "fallback"
@@ -397,6 +475,20 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     #   - IP de datacenter: no resuelve, el sitio arma cf_fallback=1 a los
     #     7s -> vía "fallback", que el servidor acepta (ver
     #     `_fallback_armado`).
+    # MOTOR=camoufox usa Firefox endurecido en vez de Chromium/Patchright.
+    # Por qué puede cambiar algo donde Chromium falla: Camoufox no se
+    # maneja por CDP (usa Juggler), parchea el fingerprint a nivel del
+    # motor en vez de con scripts inyectados, y su `humanize` mueve el
+    # cursor de forma humana desde el browser — justo lo que Turnstile
+    # estaba rechazando cuando el widget escaló a checkbox interactivo.
+    if os.environ.get("MOTOR", "").lower() == "camoufox":
+        _login_camoufox(
+            interactuar, intento, downloaded_path, proxy=proxy, vueltas=5,
+        )
+        if "path" not in downloaded_path:
+            raise RuntimeError("El flujo terminó sin descargar el archivo (camoufox).")
+        return downloaded_path["path"]
+
     with StealthySession(
         # Headful bajo xvfb (ver el workflow) en vez de headless: Cloudflare
         # detecta Chrome headless con bastante fiabilidad.
