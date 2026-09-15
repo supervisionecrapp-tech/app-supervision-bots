@@ -909,6 +909,7 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     # Acá se escuchan TODAS las respuestas y se ignoran las que no
     # parsean, hasta que llegue una de verdad.
     respuestas: list[int] = []
+    gate_roto = {"si": False}
 
     def _capturar(resp):
         if "api_detalle.php" not in resp.url and "api_kpi.php" not in resp.url:
@@ -921,6 +922,13 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
         # respuesta que da el portal cuando falta el pase de clearance.js,
         # y sin este print quedaba invisible detrás de un "cuerpo vacío".
         print(f"  [{resp.status}] {resp.url.split(chr(47))[-1][:28]} len={len(cuerpo)} :: {cuerpo[:400]}")
+        # Bug del portal: cuando la sesión no tiene el pase, su
+        # clearance_gate() llama a rut_exento_origen(), que no existe en su
+        # código, y muere con fatal error devolviendo HTML con status 200.
+        # Reconocerlo permite reintentar buscando el pase en vez de tratarlo
+        # como "el reporte vino vacío".
+        if "rut_exento_origen" in cuerpo or "Fatal error" in cuerpo:
+            gate_roto["si"] = True
         if "api_detalle.php" not in resp.url:
             return
         try:
@@ -962,13 +970,25 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     # conviene evitar si el rechazo tiene que ver con la cuenta.
     if not filas:
         for reintento in (1, 2):
-            print(f"Reporte vacío; reintento {reintento}/2 en la misma sesión.")
+            if gate_roto["si"]:
+                print(
+                    f"El portal murió en su clearance_gate() "
+                    f"(rut_exento_origen indefinida) — reintento {reintento}/2 "
+                    f"buscando un pase nuevo."
+                )
+            else:
+                print(f"Reporte vacío; reintento {reintento}/2 en la misma sesión.")
+            gate_roto["si"] = False
             _pausa_humana(page, 8, 20, motivo="antes de reconsultar")
             page.reload()
             try:
                 page.wait_for_selector("#btn-export-detalle", timeout=20000)
             except Exception:  # noqa: BLE001
                 break
+            # La recarga vuelve a ejecutar clearance.js: es la única vía
+            # para conseguir el pase que al portal le falta para no
+            # romperse.
+            _obtener_clearance(page, captura)
             _marcar_sesion_humana(page, captura)
             _pausa_humana(page, 3, 8, motivo="leyendo el reporte")
 
@@ -1003,6 +1023,13 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     captura(page, "06_antes_exportar")
     if not filas:
         captura(page, "06b_reporte_vacio")
+        if gate_roto["si"]:
+            raise RuntimeError(
+                "El portal se cayó en su propio clearance_gate(): "
+                "helpers/clearance.php:96 llama a rut_exento_origen(), que "
+                "no existe en su código. Es un bug del portal, no del bot; "
+                "pasa cuando la sesión no consigue el pase de clearance.js."
+            )
         raise RuntimeError(
             "El reporte quedó en 0 registros; no tiene sentido exportar "
             "(o el rango no tiene marcas, o el AJAX nunca terminó)."
