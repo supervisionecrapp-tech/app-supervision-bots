@@ -570,11 +570,12 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     # cursor de forma humana desde el browser — justo lo que Turnstile
     # estaba rechazando cuando el widget escaló a checkbox interactivo.
     if os.environ.get("MOTOR", "").lower() == "camoufox":
-        # 3 tiradas, no 5: el login ya entra de forma confiable, y cada
-        # tirada puede esperar hasta 180s por la descarga. Con 5 el job se
-        # pasaba de los 15 min de timeout antes de terminar.
+        # UNA sola tirada. Reintentar acá dentro no sirve: cuando el
+        # portal se cae en su clearance_gate(), se cae igual en el
+        # reintento, y cada vuelta cuesta minutos de Actions. El reintento
+        # de verdad lo hacen los crons de +30 y +60 min del workflow.
         _login_camoufox(
-            interactuar, intento, downloaded_path, proxy=proxy, vueltas=3,
+            interactuar, intento, downloaded_path, proxy=proxy, vueltas=1,
         )
         if "path" not in downloaded_path:
             raise RuntimeError("El flujo terminó sin descargar el archivo (camoufox).")
@@ -976,7 +977,7 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     # fallida dejaba 3 sesiones en el portal en vez de 1 — justo lo que
     # conviene evitar si el rechazo tiene que ver con la cuenta.
     if not filas:
-        for reintento in (1, 2):
+        for reintento in (1,):
             if gate_roto["si"]:
                 print(
                     f"El portal murió en su clearance_gate() "

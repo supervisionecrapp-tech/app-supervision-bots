@@ -67,7 +67,7 @@ def read_desde() -> dt.date | None:
     return dt.date.fromisoformat(desde_arg) if desde_arg else None
 
 
-def with_retries(intentar, max_intentos: int = 2, espera_base_s: int = 90):
+def with_retries(intentar, max_intentos: int = 1, espera_base_s: int = 90):
     """Mismo criterio de backoff exponencial que sync.py — ver ahí el porqué."""
     for intento in range(1, max_intentos + 1):
         try:

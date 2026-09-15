@@ -18,10 +18,23 @@ on:
     # cuatro consultas clavadas en la hora en punto, todos los días: nadie
     # revisa un reporte así. Se mantiene la misma ventana (10:00 a 16:00
     # Chile) pero sin la cadencia de reloj.
+    # Cada ventana tiene su horario principal y DOS reintentos, a +30 y
+    # +60 min. Los reintentos no son corridas completas: el primer paso
+    # consulta bot_runs y, si ya hubo una corrida exitosa en los ultimos
+    # 45 min, el job termina en segundos sin instalar nada. Asi el
+    # "temporizador de 30 min" no cuesta minutos cuando no hace falta.
     - cron: "13 14 * * *"
+    - cron: "43 14 * * *"
+    - cron: "13 15 * * *"
     - cron: "47 16 * * *"
+    - cron: "17 17 * * *"
+    - cron: "47 17 * * *"
     - cron: "8 18 * * *"
+    - cron: "38 18 * * *"
+    - cron: "8 19 * * *"
     - cron: "36 20 * * *"
+    - cron: "6 21 * * *"
+    - cron: "36 21 * * *"
   workflow_dispatch:
     inputs:
       fecha:
@@ -59,26 +72,55 @@ jobs:
     # La variable PRESENTISMO_RUNNER se respeta por si algún día conviene un
     # runner propio, pero ya no hace falta.
     runs-on: ${{ vars.PRESENTISMO_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 15
+    # 7, no 15: con una sola tirada una corrida sana tarda 2-3 min. Si se
+    # cuelga, corta rapido en vez de quemar 15 min de Actions.
+    timeout-minutes: 7
     defaults:
       run:
         working-directory: presentismo-sync
     steps:
+      # Antes de instalar NADA: si ya hay datos frescos, no hay nada que
+      # hacer. Corre en segundos y es lo que hace baratos los reintentos.
+      # Las corridas manuales siempre siguen.
+      - name: ¿Hace falta correr?
+        id: chequeo
+        working-directory: .
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "correr=true" >> $GITHUB_OUTPUT
+            echo "Disparo manual: se corre igual."
+            exit 0
+          fi
+          desde=$(date -u -d '45 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          cuerpo=$(curl -s -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"             "https://lbwwnrsbgaxjulpfbwdz.supabase.co/rest/v1/bot_runs?bot=eq.presentismo-sync&status=eq.success&started_at=gte.${desde}&select=started_at&limit=1")
+          if [ -n "$cuerpo" ] && [ "$cuerpo" != "[]" ]; then
+            echo "correr=false" >> $GITHUB_OUTPUT
+            echo "Ya hubo una corrida exitosa desde ${desde}: no se reintenta."
+          else
+            echo "correr=true" >> $GITHUB_OUTPUT
+            echo "Sin corrida exitosa desde ${desde}: se corre."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.chequeo.outputs.correr == 'true'
 
       - uses: actions/setup-python@v5
+        if: steps.chequeo.outputs.correr == 'true'
         with:
           python-version: "3.12"
 
       - run: pip install -r requirements.txt
+        if: steps.chequeo.outputs.correr == 'true'
 
       # Instala el navegador que usa StealthyFetcher — mismo rol que
       # `playwright install` en los otros bots de este repo.
       - run: scrapling install
+        if: steps.chequeo.outputs.correr == 'true'
 
       # Baja el build de Firefox de Camoufox (el paquete de pip, que ya
       # instaló requirements.txt, no lo incluye).
       - run: python -m camoufox fetch
+        if: steps.chequeo.outputs.correr == 'true'
 
       # El scrape corre HEADFUL (headless=False) porque Cloudflare detecta
       # Chrome headless. En Linux eso necesita un display: xvfb se lo da
@@ -86,10 +128,11 @@ jobs:
       # xdotool: para clickear el checkbox de Turnstile con un click real
       # del servidor X en vez de uno por CDP, que Turnstile ignora.
       - name: Instalar xvfb y xdotool
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.chequeo.outputs.correr == 'true'
         run: sudo apt-get install -y xvfb xdotool
 
       - name: Sync
+        if: steps.chequeo.outputs.correr == 'true'
         env:
           FRAX_USER: ${{ secrets.FRAX_USER }}
           FRAX_PASS: ${{ secrets.FRAX_PASS }}
