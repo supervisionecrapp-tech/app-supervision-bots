@@ -276,17 +276,30 @@ async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitM
 // "slicer-dropdown-popup … subtree intercepts pointer events". El popup
 // sí tiene clase real, así que se puede verificar si quedó abierto;
 // cerrarlo es volver a clickear el mismo control que lo abrió (toggle).
+// OJO con cómo se pregunta si está abierto: el reporte tiene VARIOS
+// slicers con dropdown (Muestra, Año>Mes>Semana, …), así que
+// locator(".slicer-dropdown-popup").isVisible() revienta por modo
+// estricto y, envuelto en un .catch(), miente diciendo "no hay popup"
+// (pasó en la corrida 34991882365: el popup seguía robando los clicks
+// mientras el chequeo lo daba por cerrado). Por eso se cuentan los
+// popups VISIBLES con el pseudo-selector :visible, que no es estricto.
+async function popupsAbiertos(frame) {
+  return frame
+    .locator(".slicer-dropdown-popup:visible")
+    .count()
+    .catch(() => 0);
+}
+
 async function cerrarDropdownSemana(frame, page, downloadDir, waitMultiplier) {
-  const popup = frame.locator(".slicer-dropdown-popup");
   for (let intento = 0; intento < 3; intento++) {
-    const abierto = await popup.isVisible({ timeout: 1000 }).catch(() => false);
-    if (!abierto) return;
+    if ((await popupsAbiertos(frame)) === 0) return;
     await page.mouse.click(WEEK_FILTER_DROPDOWN.x, WEEK_FILTER_DROPDOWN.y);
     await page.waitForTimeout(800 * waitMultiplier);
   }
   await debugShot(page, downloadDir, "03c-dropdown-semana");
-  const sigueAbierto = await popup.isVisible({ timeout: 1000 }).catch(() => false);
-  if (sigueAbierto) console.warn("El dropdown del filtro de semana sigue abierto — puede tapar la tabla.");
+  if ((await popupsAbiertos(frame)) > 0) {
+    console.warn("El dropdown del filtro de semana sigue abierto — puede tapar la tabla.");
+  }
 }
 
 // El .vcHeader que contiene los botones de la tabla tiene tamaño CERO
