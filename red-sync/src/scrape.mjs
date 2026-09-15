@@ -41,6 +41,10 @@ const REPORT_URLS = {
 const COORDS = {
   sidebarRed: { x: 136, y: 442 },
   tabDetalle: { x: 449, y: 147 },
+  // Flecha "←" que cierra el Panel de Filtros desplegable (shape de Power
+  // BI, sin selector real, igual que RED/Detalle). Solo se clickea si el
+  // panel está efectivamente abierto — ver cerrarPanelFiltros().
+  cerrarPanelFiltros: { x: 643, y: 181 },
 };
 
 // De Planta (nivel 0) a Sala: Planta > Oficina > Cadena > Bandera > Sala.
@@ -117,22 +121,25 @@ export async function scrapeRedExport({
     // el canvas entero y en el runner tarda bastante más que en local.
     await page.mouse.click(COORDS.sidebarRed.x, COORDS.sidebarRed.y);
     await page.waitForTimeout(8000 * waitMultiplier);
+
+    // NARTD (no ABI/VSR) abre la página RED con el "Panel de Filtros"
+    // desplegado, que tapa toda la franja x≈225-716 — incluida la pestaña
+    // Detalle y la zona donde se hacía el hover de la tabla. Confirmado
+    // en las capturas de la corrida 34986573947 (2026-09-15): es lo que
+    // dejó a NARTD fallando desde el 11/09 con timeout esperando
+    // drill-down-level-btn. Cerrarlo antes de seguir deja el layout igual
+    // al de ABI/VSR.
+    await cerrarPanelFiltros(frame, page, downloadDir, waitMultiplier);
+
     await page.mouse.click(COORDS.tabDetalle.x, COORDS.tabDetalle.y);
     await page.waitForTimeout(8000 * waitMultiplier);
     await debugShot(page, downloadDir, "02-red-detalle");
 
     await selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitMultiplier);
 
-    // El .vcHeader que contiene estos botones tiene tamaño CERO hasta que
-    // el mouse pasa sobre la visualización entera (la tabla) — es un
-    // hover-reveal atado al contenedor, no al botón. drillDownBtn.hover()
-    // no lo dispara porque el botón no tiene bounding box todavía cuando
-    // Playwright intenta ubicarlo. La solución es mover el mouse real a un
-    // punto amplio dentro de la tabla (coordenada de página, no del
-    // iframe — funciona igual que antes porque page.screenshot() ya
-    // captura el iframe compuesto en coordenadas de página) y RECIÉN
-    // ahí clickear por selector.
-    const TABLE_AREA = { x: 700, y: 650 };
+    // El hover que revela los botones de la tabla lo resuelve
+    // revelarHeaderTabla() (ver abajo): busca el contenedor del visual por
+    // selector y solo cae a coordenadas fijas si eso no alcanza.
 
     // VSR (a diferencia de NARTD/ABI) carga la tabla "Resumen de RED" YA
     // parcialmente expandida (Planta > Oficina anidados desde el
@@ -152,8 +159,7 @@ export async function scrapeRedExport({
     // más para colapsar).
     const drillUpBtn = frame.locator('[data-testid="drill-up-level-btn"]');
     for (let i = 0; i < DRILL_DOWN_STEPS; i++) {
-      await page.mouse.move(TABLE_AREA.x, TABLE_AREA.y);
-      await page.waitForTimeout(300);
+      await revelarHeaderTabla(frame, page);
       const puedeColapsar = await drillUpBtn.isEnabled().catch(() => false);
       if (!puedeColapsar) break;
       await drillUpBtn.click();
@@ -169,16 +175,14 @@ export async function scrapeRedExport({
     // estas capturas dicen exactamente en qué paso se perdió el click.
     const drillDownBtn = frame.locator('[data-testid="drill-down-level-btn"]');
     for (let i = 0; i < DRILL_DOWN_STEPS; i++) {
-      await page.mouse.move(TABLE_AREA.x, TABLE_AREA.y);
-      await page.waitForTimeout(300);
+      await revelarHeaderTabla(frame, page);
       await drillDownBtn.click();
       await page.waitForTimeout(4000 * waitMultiplier);
       await debugShot(page, downloadDir, `04-drill-${i + 1}`);
     }
 
     const moreOptionsBtn = frame.locator('[data-testid="visual-more-options-btn"]');
-    await page.mouse.move(TABLE_AREA.x, TABLE_AREA.y);
-    await page.waitForTimeout(300);
+    await revelarHeaderTabla(frame, page);
     await moreOptionsBtn.click();
     await page.waitForTimeout(1500);
     await debugShot(page, downloadDir, "05a-menu-abierto");
@@ -261,6 +265,90 @@ async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitM
 
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500 * waitMultiplier);
+}
+
+// El .vcHeader que contiene los botones de la tabla tiene tamaño CERO
+// hasta que el mouse pasa sobre la visualización entera — es un
+// hover-reveal atado al contenedor, no al botón (drillDownBtn.hover() no
+// lo dispara: el botón todavía no tiene bounding box cuando Playwright
+// intenta ubicarlo). Esto antes era UNA coordenada de página fija
+// (700,650), calibrada sobre el layout de ABI/VSR; cuando el layout de
+// NARTD cambió, ese punto pasó a caer sobre el Panel de Filtros, el
+// header no se revelaba nunca y el flujo moría con timeout de 30s en
+// drill-down-level-btn.
+//
+// Ahora va en dos etapas, de lo más robusto a lo más frágil:
+//  1. Hover sobre el contenedor del visual "Resumen de RED" ubicado por
+//     selector (varios candidatos: el nombre de clase del wrapper de
+//     Power BI no está confirmado a mano en este reporte).
+//  2. Si eso no revela el header, barrido por coordenadas de página — el
+//     punto viejo primero (sigue siendo el correcto para ABI/VSR) y
+//     después puntos más a la derecha, donde queda la tabla cuando hay
+//     un panel lateral abierto.
+// Cada intento se verifica mirando si el botón de drill-down ya es
+// visible, así el barrido corta apenas funciona en vez de asumir.
+const TABLA_CONTAINER_SELECTORS = [
+  'visual-container:has-text("Resumen de RED")',
+  '.visualContainer:has-text("Resumen de RED")',
+  '.visual-container-component:has-text("Resumen de RED")',
+];
+
+const TABLA_HOVER_POINTS = [
+  { x: 700, y: 650 }, // layout ABI/VSR (el punto histórico)
+  { x: 1200, y: 500 }, // NARTD: tabla corrida a la derecha
+  { x: 1200, y: 700 },
+  { x: 900, y: 780 },
+];
+
+async function headerVisible(frame) {
+  return frame
+    .locator('[data-testid="drill-down-level-btn"]')
+    .isVisible({ timeout: 1000 })
+    .catch(() => false);
+}
+
+async function revelarHeaderTabla(frame, page) {
+  for (const sel of TABLA_CONTAINER_SELECTORS) {
+    const cont = frame.locator(sel).first();
+    const ok = await cont
+      .hover({ timeout: 2000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!ok) continue;
+    await page.waitForTimeout(300);
+    if (await headerVisible(frame)) return;
+  }
+
+  for (const p of TABLA_HOVER_POINTS) {
+    await page.mouse.move(p.x, p.y);
+    await page.waitForTimeout(300);
+    if (await headerVisible(frame)) return;
+  }
+
+  // Sin header no hay drill ni export: el click siguiente va a fallar
+  // igual, pero con un timeout genérico. Este log deja dicha la causa
+  // real en el output de la Action.
+  console.warn("No se pudo revelar el header de la tabla — ni por selector ni por coordenadas.");
+}
+
+// El Panel de Filtros es un panel desplegable del propio reporte (shapes
+// de Power BI). No hay selector para la flecha que lo cierra, pero SÍ
+// para saber si está abierto: su título "Panel de Filtros" es texto real
+// dentro del iframe. La coordenada solo se clickea cuando ese título está
+// visible, así en los reportes que abren sin panel (ABI/VSR) esto no toca
+// nada.
+async function cerrarPanelFiltros(frame, page, downloadDir, waitMultiplier) {
+  const titulo = frame.getByText("Panel de Filtros", { exact: true }).first();
+  const abierto = await titulo.isVisible({ timeout: 3000 }).catch(() => false);
+  if (!abierto) return;
+
+  console.log("Panel de Filtros abierto — cerrándolo antes de seguir.");
+  await page.mouse.click(COORDS.cerrarPanelFiltros.x, COORDS.cerrarPanelFiltros.y);
+  await page.waitForTimeout(2000 * waitMultiplier);
+  await debugShot(page, downloadDir, "02a-panel-filtros-cerrado");
+
+  const sigueAbierto = await titulo.isVisible({ timeout: 2000 }).catch(() => false);
+  if (sigueAbierto) console.warn("El Panel de Filtros sigue abierto tras el click de cierre.");
 }
 
 async function debugShot(page, dir, name) {
