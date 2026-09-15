@@ -32,6 +32,12 @@ on:
         description: "Fecha 'desde' (YYYY-MM-DD, opcional). Vacío = el día anterior a 'hasta' (comportamiento normal). Para backfills de varios días."
         required: false
         type: string
+      solo_descarga:
+        description: "Solo descargar, sin escribir en Supabase. Activo por defecto mientras se prueba con otra cuenta."
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
       motor:
         description: "Motor del login: camoufox (Firefox endurecido) o scrapling (Chromium)."
         required: false
@@ -110,6 +116,9 @@ jobs:
           # camoufox es el que funciona: con Chromium el Turnstile escala a
           # checkbox interactivo y el server contesta error=captcha.
           MOTOR: ${{ github.event.inputs.motor || 'camoufox' }}
+          # true = descarga el Excel pero NO escribe en presentismo_registros.
+          # Por defecto true mientras se prueba con otra cuenta del portal.
+          SOLO_DESCARGA: ${{ github.event.inputs.solo_descarga || 'true' }}
           FECHA: ${{ github.event.inputs.fecha }}
           DESDE: ${{ github.event.inputs.desde }}
         shell: bash

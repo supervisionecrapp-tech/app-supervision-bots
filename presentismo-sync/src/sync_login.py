@@ -113,6 +113,15 @@ def main() -> None:
 
     download_dir = Path(os.environ.get("DOWNLOAD_DIR", "./downloads"))
 
+    # ACTIVADO POR DEFECTO desde el 15/09/2026, a pedido del usuario,
+    # mientras se prueba el portal con otra cuenta: si esa cuenta es de
+    # otra empresa, subir sus marcaciones contaminaría
+    # presentismo_registros. Para volver a cargar datos hay que poner
+    # SOLO_DESCARGA=false (o cambiar este default).
+    solo_descarga = (os.environ.get("SOLO_DESCARGA", "true") or "").strip().lower() not in ("false", "0", "no", "")
+    if solo_descarga:
+        print("*** MODO SOLO DESCARGA: no se va a escribir en presentismo_registros ***")
+
     fecha_iso = fecha.isoformat()
     desde_msg = desde.isoformat() if desde else "el día anterior"
     print(f"Sincronizando Presentismo (login real, sin cookie) — hasta {fecha_iso} (desde {desde_msg})")
@@ -129,16 +138,26 @@ def main() -> None:
                 proxy=os.environ.get("FRAX_PROXY"),
             )
             print(f"Archivo descargado: {file_path}")
+            if solo_descarga:
+                # No se escribe NADA en presentismo_registros. Pensado para
+                # probar con otra cuenta del portal: si es de otra empresa,
+                # subir sus marcaciones contaminaría la base.
+                print("SOLO_DESCARGA activo: no se sube nada a Supabase.")
+                return None
             return upload_presentismo_file(
                 file_path=file_path, supabase_url=supabase_url, supabase_service_key=supabase_service_key
             )
 
         result = with_retries(intentar)
-        print(
-            f"Listo: {result['cargadas']}/{result['total']} marcaciones cargadas "
-            f"({result['sin_sala']} sin sala reconocida)."
-        )
-        log_run(supabase, fecha_iso=fecha_iso, started_at=started_at, status="success", filas_cargadas=result["cargadas"])
+        if result is None:
+            print("Listo: descarga OK, sin carga (SOLO_DESCARGA).")
+            log_run(supabase, fecha_iso=fecha_iso, started_at=started_at, status="success")
+        else:
+            print(
+                f"Listo: {result['cargadas']}/{result['total']} marcaciones cargadas "
+                f"({result['sin_sala']} sin sala reconocida)."
+            )
+            log_run(supabase, fecha_iso=fecha_iso, started_at=started_at, status="success", filas_cargadas=result["cargadas"])
     except Exception as err:  # noqa: BLE001
         log_run(
             supabase,
