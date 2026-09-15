@@ -562,6 +562,19 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
     # api_check_multiusuario.php dice que ese RUT usa cuentas por persona.
     # Para esta cuenta queda oculto y vacío, que es lo correcto.
     _tipear(page, "#usuario", frax_user)
+
+    # Cuentas individuales: si el RUT es "multiusuario", el portal
+    # consulta api_check_multiusuario.php mientras se tipea y recién ahí
+    # muestra #usuario_v2. Sin llenarlo, esas cuentas no pueden entrar.
+    usuario_v2 = (os.environ.get("FRAX_USUARIO_V2") or "").strip()
+    if usuario_v2:
+        try:
+            page.wait_for_selector("#usuario_v2", state="visible", timeout=10000)
+            _tipear(page, "#usuario_v2", usuario_v2)
+            print("Cuenta individual: se llenó también el usuario.")
+        except Exception as err:  # noqa: BLE001
+            print(f"FRAX_USUARIO_V2 está seteado pero el campo no apareció ({err}).")
+
     _tipear(page, "#clave", frax_pass)
 
     captura(page, "01b_campos_llenos")

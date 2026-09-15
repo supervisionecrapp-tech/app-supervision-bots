@@ -93,6 +93,10 @@ jobs:
         env:
           FRAX_USER: ${{ secrets.FRAX_USER }}
           FRAX_PASS: ${{ secrets.FRAX_PASS }}
+          # Solo para cuentas individuales (RUT multiusuario): el portal
+          # muestra un campo de usuario ademas del RUT. Vacio = cuenta de
+          # empresa con clave general, que es el caso normal.
+          FRAX_USUARIO_V2: ${{ secrets.FRAX_USUARIO_V2 }}
           # Solo para escribir en Supabase (bot_runs + presentismo_registros).
           # Ya no se lee ninguna cookie de bot_config: sync_login.py loguea
           # de cero en cada corrida.
