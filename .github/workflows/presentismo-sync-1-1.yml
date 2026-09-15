@@ -18,23 +18,19 @@ on:
     # cuatro consultas clavadas en la hora en punto, todos los días: nadie
     # revisa un reporte así. Se mantiene la misma ventana (10:00 a 16:00
     # Chile) pero sin la cadencia de reloj.
-    # Cada ventana tiene su horario principal y DOS reintentos, a +30 y
-    # +60 min. Los reintentos no son corridas completas: el primer paso
-    # consulta bot_runs y, si ya hubo una corrida exitosa en los ultimos
-    # 45 min, el job termina en segundos sin instalar nada. Asi el
-    # "temporizador de 30 min" no cuesta minutos cuando no hace falta.
+    # Cada ventana tiene su horario principal y UN reintento a +30 min.
+    # El reintento no es una corrida completa: el primer paso consulta
+    # bot_runs y, si ya hubo una corrida exitosa en los ultimos 45 min,
+    # el job termina en segundos sin instalar nada. Asi el "temporizador
+    # de 30 min" no cuesta minutos cuando no hace falta.
     - cron: "13 14 * * *"
     - cron: "43 14 * * *"
-    - cron: "13 15 * * *"
     - cron: "47 16 * * *"
     - cron: "17 17 * * *"
-    - cron: "47 17 * * *"
     - cron: "8 18 * * *"
     - cron: "38 18 * * *"
-    - cron: "8 19 * * *"
     - cron: "36 20 * * *"
     - cron: "6 21 * * *"
-    - cron: "36 21 * * *"
   workflow_dispatch:
     inputs:
       fecha:
@@ -72,9 +68,9 @@ jobs:
     # La variable PRESENTISMO_RUNNER se respeta por si algún día conviene un
     # runner propio, pero ya no hace falta.
     runs-on: ${{ vars.PRESENTISMO_RUNNER || 'ubuntu-latest' }}
-    # 7, no 15: con una sola tirada una corrida sana tarda 2-3 min. Si se
-    # cuelga, corta rapido en vez de quemar 15 min de Actions.
-    timeout-minutes: 7
+    # 5: con una sola tirada una corrida sana tarda 2-3 min (setup
+    # incluido). Si se cuelga, corta rapido en vez de quemar minutos.
+    timeout-minutes: 5
     defaults:
       run:
         working-directory: presentismo-sync
