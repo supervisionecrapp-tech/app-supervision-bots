@@ -629,6 +629,36 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
     return False
 
 
+def _pausa_humana(page, minimo: float, maximo: float, *, motivo: str = "") -> None:
+    """Espera un rato variable, generando actividad de a ratos.
+
+    Existe porque el bot hacía TODO seguido, sin una sola pausa: cargar,
+    marcar, filtrar y exportar en ~90 segundos, siempre en el mismo orden
+    y a la misma velocidad. Una persona mira la pantalla, lee, duda. Y
+    `human.js` manda un heartbeat cada 4 min mientras hay actividad, así
+    que quedarse quieto también envejece la marca de la sesión."""
+    total = uniform(minimo, maximo)
+    if motivo:
+        print(f"  pausa de {total:.1f}s ({motivo})")
+    restante = total
+    while restante > 0:
+        tramo = min(restante, uniform(1.5, 4.0))
+        page.wait_for_timeout(int(tramo * 1000))
+        restante -= tramo
+        # De vez en cuando, un gesto suelto: mantiene viva la señal de
+        # actividad en vez de dejar la sesión muda.
+        if restante > 0 and randint(1, 3) == 1:
+            try:
+                page.evaluate(
+                    f"""() => window.dispatchEvent(new MouseEvent('mousemove', {{
+                        bubbles: true,
+                        clientX: {randint(200, 1200)}, clientY: {randint(150, 700)}
+                    }}))"""
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def _gestos_humanos(page) -> None:
     """Una tanda de gestos aleatorios despachados desde la página."""
     try:
@@ -719,6 +749,10 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     except Exception:
         pass
 
+    # Un rato en index antes de saltar al reporte: el bot entraba y se iba
+    # a /reportes/ en el mismo segundo, cosa que nadie hace.
+    _pausa_humana(page, 2, 7, motivo="en el inicio")
+
     page.goto(f"{BASE_URL}/reportes/")
     try:
         page.wait_for_selector("#btn-export-detalle", timeout=20000)
@@ -731,6 +765,10 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     # exige esa marca en sus endpoints de datos (ver _marcar_sesion_humana).
     print("Marcando sesión como humana...")
     _marcar_sesion_humana(page, captura)
+
+    # Mirar la pantalla antes de tocar los filtros, como haría alguien que
+    # acaba de entrar al reporte.
+    _pausa_humana(page, 3, 9, motivo="leyendo el reporte")
     print("Aplicando filtro de fechas...")
 
     # Inputs type=date nativos (value YYYY-MM-DD) — sin overlay de
@@ -774,11 +812,24 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     try:
         page.click("#btn-aplicar")
         filas = 0
-        for _ in range(120):  # hasta 60s
+        for vuelta in range(120):  # hasta 60s
             if respuestas:
                 filas = max(respuestas)
                 break
             page.wait_for_timeout(500)
+            # Mientras se espera el reporte, seguir dando señales de vida:
+            # una sesión muda envejece su marca (human.js manda heartbeat
+            # cada 4 min sólo si hubo actividad).
+            if vuelta % 12 == 11:
+                try:
+                    page.evaluate(
+                        f"""() => window.dispatchEvent(new MouseEvent('mousemove', {{
+                            bubbles: true,
+                            clientX: {randint(200, 1200)}, clientY: {randint(150, 700)}
+                        }}))"""
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
     finally:
         page.remove_listener("response", _capturar)
 
@@ -792,8 +843,9 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     # de fondo es el gate anti-bot de `_marcar_sesion_humana`: sin la
     # marca, api_kpi/api_detalle responden 200 pero sin datos.
     print(f"Reporte cargado con {filas} registros.")
-    # Un respiro para que DataTables termine de pintar antes del export.
-    page.wait_for_timeout(1200)
+    # Mirar los resultados antes de exportar, en vez de clickear "Exportar"
+    # en el mismo instante en que la tabla termina de pintarse.
+    _pausa_humana(page, 2, 8, motivo="revisando los resultados")
     captura(page, "06_antes_exportar")
     if not filas:
         captura(page, "06b_reporte_vacio")

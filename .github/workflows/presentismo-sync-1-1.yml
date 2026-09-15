@@ -14,7 +14,14 @@ on:
     # solver de Turnstile), muy por debajo de los ~1.820 min/mes que
     # consumían las 18 corridas/día de la época con login normal.
     # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
-    - cron: "0 14,16,18,20 * * *"
+    # Minutos irregulares a propósito. Antes era "0 14,16,18,20", o sea
+    # cuatro consultas clavadas en la hora en punto, todos los días: nadie
+    # revisa un reporte así. Se mantiene la misma ventana (10:00 a 16:00
+    # Chile) pero sin la cadencia de reloj.
+    - cron: "13 14 * * *"
+    - cron: "47 16 * * *"
+    - cron: "8 18 * * *"
+    - cron: "36 20 * * *"
   workflow_dispatch:
     inputs:
       fecha:
