@@ -265,6 +265,28 @@ async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitM
 
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500 * waitMultiplier);
+  await cerrarDropdownSemana(frame, page, downloadDir, waitMultiplier);
+}
+
+// El Escape de arriba NO cierra el dropdown del filtro (confirmado en la
+// corrida 34991096345 y en las capturas previas: el popup sigue pintado
+// hasta el final del flujo). En ABI/VSR daba igual porque el popup queda
+// arriba a la derecha, lejos de la tabla; en NARTD la tabla llega hasta
+// ahí y el popup le roba los clicks al botón de drill —
+// "slicer-dropdown-popup … subtree intercepts pointer events". El popup
+// sí tiene clase real, así que se puede verificar si quedó abierto;
+// cerrarlo es volver a clickear el mismo control que lo abrió (toggle).
+async function cerrarDropdownSemana(frame, page, downloadDir, waitMultiplier) {
+  const popup = frame.locator(".slicer-dropdown-popup");
+  for (let intento = 0; intento < 3; intento++) {
+    const abierto = await popup.isVisible({ timeout: 1000 }).catch(() => false);
+    if (!abierto) return;
+    await page.mouse.click(WEEK_FILTER_DROPDOWN.x, WEEK_FILTER_DROPDOWN.y);
+    await page.waitForTimeout(800 * waitMultiplier);
+  }
+  await debugShot(page, downloadDir, "03c-dropdown-semana");
+  const sigueAbierto = await popup.isVisible({ timeout: 1000 }).catch(() => false);
+  if (sigueAbierto) console.warn("El dropdown del filtro de semana sigue abierto — puede tapar la tabla.");
 }
 
 // El .vcHeader que contiene los botones de la tabla tiene tamaño CERO
