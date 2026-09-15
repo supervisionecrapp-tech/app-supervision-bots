@@ -721,24 +721,41 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     # haberlo consultado demasiado seguido, así que la respuesta correcta
     # es esperar y reintentar, no seguir insistiendo al toque ni quedarse
     # 90s contando filas en un texto que nunca va a cambiar.
-    filas = 0
-    for intento_consulta in range(1, 4):
-        try:
-            with page.expect_response(
-                lambda r: "api_detalle.php" in r.url, timeout=60000
-            ) as info:
-                page.click("#btn-aplicar")
-            filas = int(info.value.json().get("recordsTotal", 0) or 0)
-            if filas:
-                break
-            print(f"api_detalle.php respondió 0 filas (intento {intento_consulta}/3).")
-        except Exception as err:  # noqa: BLE001
-            print(f"api_detalle.php no devolvió JSON válido ({err}) — intento {intento_consulta}/3.")
+    # NO usar `expect_response`, que se queda con la PRIMERA respuesta de
+    # api_detalle.php que aparezca. La página de reportes ya dispara su
+    # propia consulta al cargar, y al clickear "Aplicar" DataTables aborta
+    # esa request en vuelo y lanza otra: la abortada llega con cuerpo
+    # vacío y rompe el .json() con "Expecting value: line 1 column 1".
+    # Esa carrera es lo que hacía fallar corridas enteras de forma
+    # intermitente (run 34967781829: 9 respuestas vacías seguidas), y no
+    # se cura esperando, porque no es saturación del portal.
+    #
+    # Acá se escuchan TODAS las respuestas y se ignoran las que no
+    # parsean, hasta que llegue una de verdad.
+    respuestas: list[int] = []
 
-        if intento_consulta < 3:
-            espera = 15000 * intento_consulta  # 15s, 30s
-            print(f"Esperando {espera // 1000}s antes de reconsultar...")
-            page.wait_for_timeout(espera)
+    def _capturar(resp):
+        if "api_detalle.php" not in resp.url:
+            return
+        try:
+            respuestas.append(int(resp.json().get("recordsTotal", 0) or 0))
+        except Exception:  # noqa: BLE001
+            # Request abortada por DataTables: cuerpo vacío, se descarta.
+            pass
+
+    page.on("response", _capturar)
+    try:
+        page.click("#btn-aplicar")
+        filas = 0
+        for _ in range(120):  # hasta 60s
+            if respuestas:
+                filas = max(respuestas)
+                break
+            page.wait_for_timeout(500)
+    finally:
+        page.remove_listener("response", _capturar)
+
+    print(f"Respuestas útiles de api_detalle.php: {respuestas or 'ninguna'}")
 
     # Historia de las descargas "trabadas", para no volver a perseguir la
     # pista equivocada: el síntoma era un timeout esperando el evento
