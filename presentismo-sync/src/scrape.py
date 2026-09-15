@@ -201,6 +201,70 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
+def _obtener_clearance(page, captura=None) -> str:
+    """Consigue el "pase de navegador" que exige la página de reportes.
+
+    Tercer control del portal, aparte del Turnstile del login y de la
+    marca humana. Lo documenta `js/clearance.js`: "obtiene el pase de
+    navegador via Turnstile invisible. Se incluye en las paginas que
+    consumen endpoints protegidos (reportes, registrados, inactivos). Al
+    cargar, ejecuta Turnstile de forma invisible, postea el token a
+    api_clearance.php y marca el pase en la sesion."
+
+    SIN ese pase, api_kpi.php y api_detalle.php no entregan datos — que es
+    exactamente el síntoma que perseguimos todo el tiempo: index.php carga
+    bien (no consume endpoints protegidos) y /reportes/ se ve pero nunca
+    trae nada.
+
+    El script expone `window.CLEARANCE_READY`, una promesa que resuelve
+    true/false. Y si Turnstile necesita interacción, revela el widget en
+    un overlay (`#cf-clearance-holder`) justamente para que se lo pueda
+    clickear; si nadie lo clickea, no hay pase."""
+    estado = page.evaluate(
+        """() => {
+            if (!window.CLEARANCE_READY) return 'sin_script';
+            return Promise.race([
+                window.CLEARANCE_READY.then(v => v ? 'ok' : 'fallo'),
+                new Promise(r => setTimeout(() => r('timeout'), 25000)),
+            ]);
+        }"""
+    )
+    print(f"Pase de clearance: {estado}")
+    if estado == "ok":
+        return estado
+
+    # Turnstile no lo resolvió solo: si el overlay quedó visible, hay que
+    # clickear el checkbox — es la vía que el propio sitio deja abierta.
+    visible = page.evaluate(
+        """() => {
+            const h = document.getElementById('cf-clearance-holder');
+            return !!(h && h.style.display !== 'none' && h.offsetParent !== null);
+        }"""
+    )
+    print(f"  overlay del pase visible: {visible}")
+    if captura:
+        captura(page, "05b_clearance_pendiente")
+    if not visible:
+        return estado
+
+    try:
+        marco = page.frame_locator("#cf-clearance-holder iframe")
+        marco.locator("input[type=checkbox]").first.click(timeout=15000)
+        print("  checkbox del pase clickeado.")
+    except Exception as err:  # noqa: BLE001
+        print(f"  no se pudo clickear el checkbox del pase ({err}).")
+        return estado
+
+    estado = page.evaluate(
+        """() => Promise.race([
+            window.CLEARANCE_READY.then(v => v ? 'ok' : 'fallo'),
+            new Promise(r => setTimeout(() => r('timeout'), 25000)),
+        ])"""
+    )
+    print(f"Pase de clearance tras el click: {estado}")
+    return estado
+
+
 def _cerrar_sesion(page) -> None:
     """Cierra la sesión en el portal (`cierra_sesion.php`, el mismo enlace
     "Cerrar Sesion" del menú).
@@ -800,6 +864,10 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
 
     # ANTES de pedir datos: marcar la sesión como humana. El portal
     # exige esa marca en sus endpoints de datos (ver _marcar_sesion_humana).
+    # El pase de clearance.js va PRIMERO: sin él los endpoints de datos no
+    # entregan nada, por más marcada que esté la sesión.
+    _obtener_clearance(page, captura)
+
     print("Marcando sesión como humana...")
     _marcar_sesion_humana(page, captura)
 
@@ -837,6 +905,16 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
     respuestas: list[int] = []
 
     def _capturar(resp):
+        if "api_detalle.php" not in resp.url and "api_kpi.php" not in resp.url:
+            return
+        try:
+            cuerpo = resp.text()
+        except Exception:  # noqa: BLE001
+            cuerpo = ""
+        # Loguear SIEMPRE el status: un 403 con error "sin_clearance" es la
+        # respuesta que da el portal cuando falta el pase de clearance.js,
+        # y sin este print quedaba invisible detrás de un "cuerpo vacío".
+        print(f"  [{resp.status}] {resp.url.split('/')[-1][:28]} len={len(cuerpo)} {cuerpo[:90]}")
         if "api_detalle.php" not in resp.url:
             return
         try:
