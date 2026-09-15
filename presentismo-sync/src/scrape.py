@@ -859,6 +859,39 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
 
     print(f"Respuestas útiles de api_detalle.php: {respuestas or 'ninguna'}")
 
+    # Si vino vacío, reintentar DENTRO de la misma sesión antes de gastar
+    # un login nuevo. Antes cada tirada relogueaba, así que una corrida
+    # fallida dejaba 3 sesiones en el portal en vez de 1 — justo lo que
+    # conviene evitar si el rechazo tiene que ver con la cuenta.
+    if not filas:
+        for reintento in (1, 2):
+            print(f"Reporte vacío; reintento {reintento}/2 en la misma sesión.")
+            _pausa_humana(page, 8, 20, motivo="antes de reconsultar")
+            page.reload()
+            try:
+                page.wait_for_selector("#btn-export-detalle", timeout=20000)
+            except Exception:  # noqa: BLE001
+                break
+            _marcar_sesion_humana(page, captura)
+            _pausa_humana(page, 3, 8, motivo="leyendo el reporte")
+
+            respuestas.clear()
+            page.on("response", _capturar)
+            try:
+                page.fill("#f-fi", fecha_fi.isoformat())
+                page.click("#btn-aplicar")
+                for _ in range(120):
+                    if respuestas:
+                        filas = max(respuestas)
+                        break
+                    page.wait_for_timeout(500)
+            finally:
+                page.remove_listener("response", _capturar)
+
+            print(f"  -> respuestas: {respuestas or 'ninguna'}")
+            if filas:
+                break
+
     # Historia de las descargas "trabadas", para no volver a perseguir la
     # pista equivocada: el síntoma era un timeout esperando el evento
     # `download`, pero el portal simplemente no generaba archivo porque el
