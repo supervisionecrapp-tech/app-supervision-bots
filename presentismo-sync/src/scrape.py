@@ -221,7 +221,7 @@ def _obtener_clearance(page, captura=None) -> str:
     un overlay (`#cf-clearance-holder`) justamente para que se lo pueda
     clickear; si nadie lo clickea, no hay pase."""
     estado = page.evaluate(
-        """() => {
+        """mw:() => {
             if (!window.CLEARANCE_READY) return 'sin_script';
             return Promise.race([
                 window.CLEARANCE_READY.then(v => v ? 'ok' : 'fallo'),
@@ -236,7 +236,7 @@ def _obtener_clearance(page, captura=None) -> str:
     # Turnstile no lo resolvió solo: si el overlay quedó visible, hay que
     # clickear el checkbox — es la vía que el propio sitio deja abierta.
     visible = page.evaluate(
-        """() => {
+        """mw:() => {
             const h = document.getElementById('cf-clearance-holder');
             return !!(h && h.style.display !== 'none' && h.offsetParent !== null);
         }"""
@@ -256,7 +256,7 @@ def _obtener_clearance(page, captura=None) -> str:
         return estado
 
     estado = page.evaluate(
-        """() => Promise.race([
+        """mw:() => Promise.race([
             window.CLEARANCE_READY.then(v => v ? 'ok' : 'fallo'),
             new Promise(r => setTimeout(() => r('timeout'), 25000)),
         ])"""
@@ -298,6 +298,12 @@ def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None,
         # y también con humanize=False (34909061566). Los gestos ahora se
         # despachan desde la página (ver `_marcar_sesion_humana`).
         "humanize": False,
+        # Necesario para poder LEER variables que define la página (con el
+        # prefijo "mw:" en evaluate). Sin esto Camoufox evalúa en un mundo
+        # aislado y `window.CLEARANCE_READY` se ve como inexistente — que
+        # es por qué `_obtener_clearance` reportaba "sin_script" aunque el
+        # script sí estuviera cargado.
+        "main_world_eval": True,
         "geoip": True,
         "locale": "es-CL",
         "os": "windows",
