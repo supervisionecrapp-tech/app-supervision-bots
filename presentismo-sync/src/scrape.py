@@ -220,6 +220,13 @@ def _obtener_clearance(page, captura=None) -> str:
     true/false. Y si Turnstile necesita interacción, revela el widget en
     un overlay (`#cf-clearance-holder`) justamente para que se lo pueda
     clickear; si nadie lo clickea, no hay pase."""
+    # Esperar a que clearance.js se ejecute: en la primera carga el chequeo
+    # corría antes y devolvía "sin_script" aunque el script estuviera.
+    for _ in range(20):
+        if page.evaluate("mw:() => !!window.CLEARANCE_READY"):
+            break
+        page.wait_for_timeout(500)
+
     estado = page.evaluate(
         """mw:() => {
             if (!window.CLEARANCE_READY) return 'sin_script';
