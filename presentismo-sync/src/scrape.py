@@ -914,7 +914,7 @@ def _exportar(page, captura, downloaded_path, *, fecha_fi: dt.date, fecha_ff: dt
         # Loguear SIEMPRE el status: un 403 con error "sin_clearance" es la
         # respuesta que da el portal cuando falta el pase de clearance.js,
         # y sin este print quedaba invisible detrás de un "cuerpo vacío".
-        print(f"  [{resp.status}] {resp.url.split('/')[-1][:28]} len={len(cuerpo)} {cuerpo[:90]}")
+        print(f"  [{resp.status}] {resp.url.split(chr(47))[-1][:28]} len={len(cuerpo)} :: {cuerpo[:400]}")
         if "api_detalle.php" not in resp.url:
             return
         try:
