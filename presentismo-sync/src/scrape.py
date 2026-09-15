@@ -201,6 +201,24 @@ def _click_real_xdotool(page, captura) -> bool:
     return True
 
 
+def _cerrar_sesion(page) -> None:
+    """Cierra la sesión en el portal (`cierra_sesion.php`, el mismo enlace
+    "Cerrar Sesion" del menú).
+
+    El bot nunca lo hacía: cada tirada logueaba de cero, se quedaba con un
+    PHPSESSID nuevo y lo abandonaba. Con 3 tiradas por corrida y 4
+    corridas por día, eso son ~12 sesiones diarias quedando abiertas del
+    lado del servidor, y muchas más los días de pruebas. Encaja con el
+    patrón de "la primera anda y la siguiente no" que se repitió todo el
+    tiempo. Una persona cierra sesión, o al menos no deja decenas
+    simultáneas."""
+    try:
+        page.goto(f"{BASE_URL}/cierra_sesion.php", timeout=20000)
+        print("Sesión cerrada en el portal.")
+    except Exception as err:  # noqa: BLE001
+        print(f"No se pudo cerrar la sesión ({err}).")
+
+
 def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None, vueltas: int) -> None:
     """Corre el login con Camoufox (Firefox endurecido) en vez de
     Chromium. Entrega una `page` de Playwright normal, así que todo el
@@ -242,6 +260,12 @@ def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None,
             except Exception as err:  # noqa: BLE001
                 print(f"Tirada {vuelta} falló: {err}")
             finally:
+                # Cerrar SIEMPRE, también cuando la tirada falla: si no,
+                # cada intento deja una sesión abierta en el portal.
+                try:
+                    _cerrar_sesion(page)
+                except Exception:  # noqa: BLE001
+                    pass
                 try:
                     page.close()
                 except Exception:  # noqa: BLE001
