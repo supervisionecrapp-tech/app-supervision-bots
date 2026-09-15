@@ -596,6 +596,41 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
     # El recorrido va igual de aleatorizado (puntos, cantidad de pasos,
     # esperas y scroll), porque una secuencia fija repetida 4 veces al día
     # es en sí misma una firma de bot.
+    # Se VERIFICA que la marca haya llegado, con un listener (no con
+    # expect_response, que al bloquear dentro del `with` causaba los
+    # cuelgues). Si no llega, se repiten los gestos: cuando la sesión
+    # queda sin marcar, los endpoints de datos no responden nunca y el
+    # reporte se queda girando para siempre (run 34976619878).
+    marcada = {"ok": False}
+
+    def _on_marca(resp):
+        if "api_interaccion.php" in resp.url:
+            marcada["ok"] = True
+
+    page.on("response", _on_marca)
+    try:
+        for ronda in range(1, 4):
+            _gestos_humanos(page)
+            for _ in range(20):  # hasta 10s esperando el beacon
+                if marcada["ok"]:
+                    break
+                page.wait_for_timeout(500)
+            if marcada["ok"]:
+                print(f"Sesión marcada como humana (ronda {ronda}).")
+                return True
+            print(f"La marca no llegó en la ronda {ronda}; se repiten los gestos.")
+    finally:
+        try:
+            page.remove_listener("response", _on_marca)
+        except Exception:  # noqa: BLE001
+            pass
+
+    print("No se pudo confirmar la marca humana tras 3 rondas.")
+    return False
+
+
+def _gestos_humanos(page) -> None:
+    """Una tanda de gestos aleatorios despachados desde la página."""
     try:
         x = randint(280, 900)
         y = randint(180, 520)
@@ -634,14 +669,6 @@ def _marcar_sesion_humana(page, captura=None) -> bool:
         print("  gesto: scroll arriba")
     except Exception as err:  # noqa: BLE001
         print(f"Falló algún gesto de la marca humana: {err}")
-        return False
-
-    # Margen para que salga el beacon a api_interaccion.php. No se usa
-    # expect_response a propósito (ver arriba); si la marca no prendió,
-    # el chequeo de `filas` más abajo lo va a cazar igual.
-    page.wait_for_timeout(randint(1500, 2600))
-    print("Gestos de interacción humana enviados.")
-    return True
 
 
 def _esperar_datos_reporte(page, *, segundos: int = 90) -> int:
