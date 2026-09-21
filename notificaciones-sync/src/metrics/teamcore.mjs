@@ -28,7 +28,7 @@ export async function computeSemanaPasada(supabase, salas, lunesSemana) {
 
   const [{ data: registros, error: e1 }, { data: excepciones, error: e2 }] = await Promise.all([
     supabase.from("teamcore_usabilidad_registros").select("sala_id, fecha").in("sala_id", salaIds).gte("fecha", desde).lte("fecha", hasta),
-    supabase.from("teamcore_excepciones").select("sala_id, fecha").in("sala_id", salaIds).gte("fecha", desde).lte("fecha", hasta),
+    supabase.from("teamcore_excepciones_efectivas").select("sala_id, fecha").in("sala_id", salaIds).gte("fecha", desde).lte("fecha", hasta),
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
@@ -71,7 +71,7 @@ export async function computeHoy(supabase, salas, hoy) {
 
   const [{ data: registrosHoy, error: e1 }, { data: excepcionesHoy, error: e2 }] = await Promise.all([
     supabase.from("teamcore_usabilidad_registros").select("sala_id").in("sala_id", salaIds).eq("fecha", hoyIso),
-    supabase.from("teamcore_excepciones").select("sala_id").in("sala_id", salaIds).eq("fecha", hoyIso),
+    supabase.from("teamcore_excepciones_efectivas").select("sala_id").in("sala_id", salaIds).eq("fecha", hoyIso),
   ]);
   if (e1) throw e1;
   if (e2) throw e2;

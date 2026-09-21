@@ -25,6 +25,16 @@ function salasPresentismo(salas) {
 
 /** % agregado + peor sala para una semana ISO puntual (anio/semana ya
  * cerrada — "semana pasada"). null si el alcance no tiene salas WM. */
+//
+// LIMITACION CONOCIDA: las excepciones de dia (excepciones_dias / vista
+// excepciones_por_sala_dia) NO se aplican aca. Este calculo parte de los
+// TOTALES semanales ya agregados en el servidor
+// (presentismo_horas_realizadas_por_sala + horas_objetivo_total), y de un
+// total no se puede descontar un dia suelto. El resto de la app si las
+// aplica, porque trabaja dia por dia. Para cerrar la brecha habria que
+// rehacer esta funcion sobre presentismo_horas_realizadas_por_sala_dia y
+// las columnas horas_lunes..horas_domingo.
+
 export async function computeSemanaPasada(supabase, salas, anio, semana) {
   const scoped = salasPresentismo(salas);
   if (scoped.length === 0) return null;
@@ -87,19 +97,25 @@ export async function computeHoy(supabase, salas, hoy, anio, semana) {
   const col = dayColForDate(hoy);
   const fechaIso = hoy.toISOString().slice(0, 10);
 
-  const [{ data: objetivo, error: e1 }, { data: realizadas, error: e2 }] = await Promise.all([
+  const [{ data: objetivo, error: e1 }, { data: realizadas, error: e2 }, { data: eximidasHoy, error: e3 }] = await Promise.all([
     supabase.from("presentismo_horas_objetivo").select(`sala_id, ${col}`).in("sala_id", salaIds).eq("anio", anio).eq("semana", semana),
     supabase.from("presentismo_horas_realizadas_por_sala_dia").select("sala_id, horas_realizadas").in("sala_id", salaIds).eq("fecha", fechaIso),
+    // Salas eximidas de presentismo hoy (Configuraciones -> Excepciones del
+    // panel): el dia sale del calculo entero, no cuenta objetivo ni real.
+    supabase.from("excepciones_por_sala_dia").select("sala_id").in("sala_id", salaIds).eq("fecha", fechaIso).eq("aplica_presentismo_wm", true),
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
+  if (e3) throw e3;
 
+  const eximidas = new Set((eximidasHoy ?? []).map((r) => r.sala_id));
   const realById = new Map((realizadas ?? []).map((r) => [r.sala_id, r.horas_realizadas ?? 0]));
   let sumTarget = 0;
   let sumReal = 0;
   let sobrecumplimiento = 0;
   let faltante = 0;
   for (const row of objetivo ?? []) {
+    if (eximidas.has(row.sala_id)) continue;
     const target = row[col];
     if (target == null) continue;
     const real = realById.get(row.sala_id) ?? 0;
