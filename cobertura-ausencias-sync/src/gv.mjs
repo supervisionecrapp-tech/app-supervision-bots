@@ -6,6 +6,13 @@
 
 const GV_BASE = "https://customerapi.geovictoria.com/api/v1";
 const GV_MAX_REGISTROS_POR_LLAMADA = 1400;
+// Además del límite de registros de arriba, GV limita AttendanceBook a 200
+// USUARIOS por llamada sin importar el rango de fechas (0123
+// OutOfLimitException, "The total number of the requested users is greater
+// than 200", confirmado en pruebas reales) — a principios de mes, con
+// díasEnRango chico, GV_MAX_REGISTROS_POR_LLAMADA/dias solo daba de sobra
+// para superar los 200 usuarios. Con margen (190) bajo el límite real.
+const GV_MAX_USUARIOS_POR_LLAMADA = 190;
 const GV_RATE_LIMIT_DELAY_MS = 400;
 
 export function normalizeRut(id) {
@@ -102,7 +109,10 @@ async function gvAttendanceBookBatch(token, userIds, rango) {
 
 export async function gvAttendanceBookAll(token, userIds, rango) {
   const dias = diasEnRango(rango.desde, rango.hasta);
-  const batchSize = Math.max(1, Math.floor(GV_MAX_REGISTROS_POR_LLAMADA / dias));
+  const batchSize = Math.min(
+    Math.max(1, Math.floor(GV_MAX_REGISTROS_POR_LLAMADA / dias)),
+    GV_MAX_USUARIOS_POR_LLAMADA,
+  );
   const batches = [];
   for (let i = 0; i < userIds.length; i += batchSize) {
     batches.push(userIds.slice(i, i + batchSize));
@@ -115,6 +125,10 @@ export async function gvAttendanceBookAll(token, userIds, rango) {
   return results;
 }
 
+// A diferencia de bots/asistencia-sync, acá NO se guarda el rango del
+// permiso (TimeOffs[0].Starts/Ends). No es un olvido: core.mjs se queda solo
+// con las filas `absent && !timeoff_type`, o sea justamente las que NO tienen
+// permiso, así que cbtrs_ausencias nunca vería esas fechas.
 export function gvUsersToFilas(users) {
   const filas = [];
   for (const user of users) {

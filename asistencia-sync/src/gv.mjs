@@ -4,7 +4,8 @@
 // solo se traduce TS Deno -> JS Node):
 //   - GV limita AttendanceBook a 1500 REGISTROS por llamada (usuario x día
 //     del rango), no 1500 usuarios — el tamaño de lote se calcula según
-//     cuántos días tiene el rango pedido.
+//     cuántos días tiene el rango pedido, y además se topa a 200 usuarios
+//     por llamada (límite aparte, independiente del rango de fechas).
 //   - GV limita a 3 llamadas/segundo — 400ms de por medio entre lotes.
 //   - AttendanceBook exige el RUT sin puntos/guión y con "K" mayúscula.
 //   - GroupDescription solo viene poblado en AttendanceBook, no en
@@ -13,6 +14,13 @@
 
 const GV_BASE = "https://customerapi.geovictoria.com/api/v1";
 const GV_MAX_REGISTROS_POR_LLAMADA = 1400;
+// Además del límite de registros de arriba, GV limita AttendanceBook a 200
+// USUARIOS por llamada sin importar el rango de fechas (0123
+// OutOfLimitException, "The total number of the requested users is greater
+// than 200", confirmado en pruebas reales) — a principios de mes, con
+// díasEnRango chico, GV_MAX_REGISTROS_POR_LLAMADA/dias solo daba de sobra
+// para superar los 200 usuarios. Con margen (190) bajo el límite real.
+const GV_MAX_USUARIOS_POR_LLAMADA = 190;
 const GV_RATE_LIMIT_DELAY_MS = 400;
 
 export function normalizeRut(id) {
@@ -101,7 +109,10 @@ async function gvAttendanceBookBatch(token, userIds, rango) {
 
 export async function gvAttendanceBookAll(token, userIds, rango) {
   const dias = diasEnRango(rango.desde, rango.hasta);
-  const batchSize = Math.max(1, Math.floor(GV_MAX_REGISTROS_POR_LLAMADA / dias));
+  const batchSize = Math.min(
+    Math.max(1, Math.floor(GV_MAX_REGISTROS_POR_LLAMADA / dias)),
+    GV_MAX_USUARIOS_POR_LLAMADA,
+  );
   const batches = [];
   for (let i = 0; i < userIds.length; i += batchSize) {
     batches.push(userIds.slice(i, i + batchSize));
@@ -124,7 +135,10 @@ export function gvUsersToFilas(users) {
     for (const dia of user.PlannedInterval ?? []) {
       const shifts = dia.Shifts ?? [];
       if (shifts.length === 0) continue;
-      const timeOffs = dia.TimeOffs ?? [];
+      // Siempre el MISMO elemento para tipo y rango: si un día trae dos
+      // permisos, mezclar el tipo de uno con las fechas del otro daría una
+      // fila que no describe ningún permiso real.
+      const permiso = (dia.TimeOffs ?? [])[0];
       const primerIngreso = (dia.Punches ?? [])
         .filter((p) => p.Type === "Ingreso")
         .sort((a, b) => a.Date.localeCompare(b.Date))[0];
@@ -135,7 +149,11 @@ export function gvUsersToFilas(users) {
         fecha: isoFromYyyyMmDd((dia.Date ?? "").slice(0, 8)),
         absent: dia.Absent === "True",
         shift_begins: shifts[0].Begins,
-        timeoff_type: timeOffs[0]?.TimeOffTypeDescription ?? null,
+        timeoff_type: permiso?.TimeOffTypeDescription ?? null,
+        timeoff_starts: isoDeFechaGv(permiso?.Starts),
+        timeoff_ends: isoDeFechaGv(permiso?.Ends),
+        timeoff_start_time: textoONulo(permiso?.StartTime),
+        timeoff_end_time: textoONulo(permiso?.EndTime),
         primer_ingreso_gmt0: primerIngreso?.Date ?? null,
       });
     }
@@ -145,4 +163,18 @@ export function gvUsersToFilas(users) {
 
 function isoFromYyyyMmDd(s) {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+}
+
+// Las fechas de permiso de GV vienen como yyyyMMddHHmmss (14 chars). Se
+// valida en vez de cortar a ciegas: un formato inesperado tiene que dejar la
+// columna en null, no tumbar el upsert de las miles de filas del lote por un
+// date inválido. El permiso es un dato accesorio; la asistencia no.
+export function isoDeFechaGv(s) {
+  if (typeof s !== "string" || !/^\d{8}/.test(s)) return null;
+  return isoFromYyyyMmDd(s.slice(0, 8));
+}
+
+export function textoONulo(s) {
+  const limpio = typeof s === "string" ? s.trim() : "";
+  return limpio === "" ? null : limpio;
 }
