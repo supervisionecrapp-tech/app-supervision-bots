@@ -88,10 +88,13 @@ archivo real todavía (`red-sync/src/scrape.mjs` y `redColumns.mjs`).
 ## teamcore-sync
 
 Corre vía [`.github/workflows/teamcore-sync.yml`](./.github/workflows/teamcore-sync.yml):
-cada 2 horas de 9:00 a 23:00 Chile, siempre carga el día actual — el dato
-es booleano por día, no hace falta una corrida especial de "día
-anterior". También soporta `workflow_dispatch` manual con una fecha
-específica.
+cada 2 horas de 11:00 a 19:00 Chile, siempre baja el rango **día anterior
++ día actual**: el portal sigue registrando visitas de ayer después de
+medianoche, así que cada corrida rehace ayer y completa lo que había
+quedado a medias (el upsert por `sala_id,fecha` lo absorbe sin
+duplicar). También soporta `workflow_dispatch` manual con una fecha
+específica, que se interpreta como el día final del rango (baja esa
+fecha y la anterior).
 
 A diferencia de los otros dos, el portal de Teamcore **no es Power BI**
 — es una app Django propia con login usuario/contraseña normal y CSRF

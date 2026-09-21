@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       fecha:
-        description: "YYYY-MM-DD (vacío = hoy)"
+        description: "YYYY-MM-DD, día final del rango (vacío = hoy). Siempre baja también el día anterior."
         required: false
 
 jobs:

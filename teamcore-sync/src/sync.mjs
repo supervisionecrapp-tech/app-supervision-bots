@@ -24,16 +24,19 @@ async function withRetries(intentar, { maxIntentos = 3, esperaBaseMs = 60000 } =
 
 function readArgs() {
   // FECHA opcional en formato YYYY-MM-DD (workflow_dispatch); default =
-  // hoy en huso horario de Chile.
+  // hoy en huso horario de Chile. Sea cual sea, el rango que se baja es
+  // ese día MÁS el anterior: Teamcore sigue registrando visitas del día
+  // previo después de medianoche, así que cada corrida rehace ayer y
+  // arrastra lo que faltaba (el upsert por sala+fecha lo absorbe).
   const fechaArg = process.env.FECHA || process.argv[2];
-  if (fechaArg) return { fecha: new Date(`${fechaArg}T12:00:00`) };
-
   const hoyChile = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago" }).format(new Date());
-  return { fecha: new Date(`${hoyChile}T12:00:00`) };
+  const fechaHasta = new Date(`${fechaArg || hoyChile}T12:00:00Z`);
+  const fechaDesde = new Date(fechaHasta.getTime() - 24 * 60 * 60 * 1000);
+  return { fechaDesde, fechaHasta };
 }
 
 async function main() {
-  const { fecha } = readArgs();
+  const { fechaDesde, fechaHasta } = readArgs();
   const teamcoreUser = requireEnv("TEAMCORE_USER");
   const teamcorePass = requireEnv("TEAMCORE_PASS");
   const supabaseUrl = process.env.SUPABASE_URL || "https://lbwwnrsbgaxjulpfbwdz.supabase.co";
@@ -43,13 +46,15 @@ async function main() {
   const downloadDir = process.env.DOWNLOAD_DIR || "./downloads";
   mkdirSync(downloadDir, { recursive: true });
 
-  const fechaIso = fecha.toISOString().slice(0, 10);
-  console.log(`Sincronizando Teamcore Usabilidad — fecha ${fechaIso}`);
+  const desdeIso = fechaDesde.toISOString().slice(0, 10);
+  const hastaIso = fechaHasta.toISOString().slice(0, 10);
+  const fechaIso = `${desdeIso}..${hastaIso}`;
+  console.log(`Sincronizando Teamcore Usabilidad — fechas ${desdeIso} y ${hastaIso}`);
   const startedAt = new Date().toISOString();
 
   try {
     const result = await withRetries(async () => {
-      const filePath = await scrapeTeamcoreExport({ fecha, teamcoreUser, teamcorePass, downloadDir });
+      const filePath = await scrapeTeamcoreExport({ fechaDesde, fechaHasta, teamcoreUser, teamcorePass, downloadDir });
       console.log(`Archivo descargado: ${filePath}`);
       return uploadTeamcoreFile({ filePath, supabaseUrl, supabaseServiceKey });
     });

@@ -179,13 +179,18 @@ async function pollForDownload(jar, { inicio, termino }, { timeoutMs = 180000, i
   throw new Error(`Timeout esperando que "${wantedPrefix}" quede Completado en /corex/downloads`);
 }
 
-export async function scrapeTeamcoreExport({ fecha, teamcoreUser, teamcorePass, downloadDir }) {
+// El rango que se le pide al portal va de `fechaDesde` a `fechaHasta`
+// (ambas inclusive). El caller pide siempre ayer+hoy: la data del día
+// anterior se sigue completando después de medianoche, así que volver a
+// bajarla cada corrida corrige lo que quedó a medias.
+export async function scrapeTeamcoreExport({ fechaDesde, fechaHasta, teamcoreUser, teamcorePass, downloadDir }) {
   const jar = {};
   await login(jar, teamcoreUser, teamcorePass);
 
-  const fechaStr = toDDMMYYYY(fecha);
-  await requestDownload(jar, { inicio: fechaStr, termino: fechaStr });
-  const href = await pollForDownload(jar, { inicio: fechaStr, termino: fechaStr });
+  const inicio = toDDMMYYYY(fechaDesde);
+  const termino = toDDMMYYYY(fechaHasta);
+  await requestDownload(jar, { inicio, termino });
+  const href = await pollForDownload(jar, { inicio, termino });
 
   // El link de descarga apunta directo a S3 (bucket público, sin firma) —
   // confirmado en una corrida real: no hace falta reenviar cookies de
@@ -194,7 +199,7 @@ export async function scrapeTeamcoreExport({ fecha, teamcoreUser, teamcorePass, 
   if (!fileRes.ok) throw new Error(`No se pudo descargar el archivo final (status ${fileRes.status}): ${href}`);
   const buf = Buffer.from(await fileRes.arrayBuffer());
 
-  const filePath = `${downloadDir}/teamcore-${fecha.toISOString().slice(0, 10)}.xlsx`;
+  const filePath = `${downloadDir}/teamcore-${fechaDesde.toISOString().slice(0, 10)}_a_${fechaHasta.toISOString().slice(0, 10)}.xlsx`;
   await writeFile(filePath, buf);
   return filePath;
 }
