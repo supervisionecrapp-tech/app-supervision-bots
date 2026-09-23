@@ -227,12 +227,27 @@ async function buildResolver(supabase) {
   return { resolve, salaIdBySap };
 }
 
+// Reintenta cada página: de tanto en tanto una consulta puntual rebota con
+// "JWT issued at future" (401) mientras las demás, disparadas en el mismo
+// milisegundo con la misma key, responden 200 — desajuste de reloj
+// transitorio del lado de Supabase, no una key vencida. Sin este retry, ese
+// tropezón de un segundo tiraba abajo toda la corrida aunque el reporte ya
+// estuviera descargado.
 async function selectAll(supabase, table, columns) {
   const PAGE = 1000;
+  const MAX_INTENTOS = 3;
   let from = 0;
   let all = [];
   for (;;) {
-    const { data, error } = await supabase.from(table).select(columns).range(from, from + PAGE - 1);
+    let data, error;
+    for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+      ({ data, error } = await supabase.from(table).select(columns).range(from, from + PAGE - 1));
+      if (!error) break;
+      if (intento < MAX_INTENTOS) {
+        console.error(`${table}: ${error.message} (intento ${intento}/${MAX_INTENTOS}), reintentando…`);
+        await new Promise((r) => setTimeout(r, 1000 * intento));
+      }
+    }
     if (error) throw new Error(`${table}: ${error.message}`);
     all = all.concat(data);
     if (data.length < PAGE) break;
