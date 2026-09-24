@@ -234,10 +234,39 @@ export async function scrapeRedExport({
 //  3. Expandir el año buscado (chevron) → aparecen sus meses.
 //  4. Expandir el mes buscado (chevron) → aparecen sus semanas.
 //  5. Marcar el checkbox de la semana buscada.
-// Las semanas se agrupan bajo el mes de SU LUNES, no el del día 1 del mes
-// (ver firstIsoWeekOfMonth en isoWeek.mjs) — por eso agosto 2026 arranca
-// en la semana 32, no la 31.
+// Las semanas se agrupan bajo el mes de SU JUEVES, no el del lunes ni el
+// del día 1 del mes (ver isoWeekOwnerMonth en isoWeek.mjs) — por eso
+// agosto 2026 arranca en la semana 32, no la 31, y la semana 36 queda
+// bajo Septiembre aunque su lunes sea 31 de agosto.
 const WEEK_FILTER_DROPDOWN = { x: 1843, y: 160 };
+
+// El popup del árbol Año>Mes>Semana tiene altura fija y NO hace scroll
+// solo — confirmado con las capturas de debug de un backfill real: mes 8
+// y mes 9 tienen la misma cantidad de semanas (4 cada uno), pero mes 9
+// queda un renglón más abajo en el árbol (un mes colapsado más arriba,
+// 1-8 en vez de 1-7), así que su última semana (39) cae justo debajo del
+// borde recortado del popup mientras que la de mes 8 (35, misma posición)
+// todavía entraba. El locator de la semana no encuentra NADA en vez de
+// fallar el click — típico de una lista virtualizada de Power BI que no
+// pinta en el DOM los ítems fuera del área visible — por eso hace falta
+// scrollear el popup, no solo el checkbox al que se apunta.
+async function scrollWeekIntoView(frame, page, weekItem, downloadDir, waitMultiplier = 1) {
+  if (await weekItem.count() > 0 && (await weekItem.isVisible().catch(() => false))) return;
+
+  // Punto dentro del cuerpo scrolleable del popup (debajo del año/meses,
+  // no sobre el header "Año > Mes > Semana" ni sobre "Seleccionar todo").
+  const scrollPoint = { x: 1750, y: 350 };
+  const MAX_INTENTOS = 12;
+  for (let intento = 0; intento < MAX_INTENTOS; intento++) {
+    if (await weekItem.isVisible({ timeout: 300 }).catch(() => false)) return;
+    await page.mouse.move(scrollPoint.x, scrollPoint.y);
+    await page.mouse.wheel(0, 120);
+    await page.waitForTimeout(200 * waitMultiplier);
+  }
+
+  await debugShot(page, downloadDir, "03a2-filtro-semana-scroll-fallido");
+  console.warn(`No se pudo scrollear hasta encontrar la semana en el popup tras ${MAX_INTENTOS} intentos.`);
+}
 
 async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitMultiplier = 1) {
   await page.mouse.click(WEEK_FILTER_DROPDOWN.x, WEEK_FILTER_DROPDOWN.y);
@@ -259,6 +288,7 @@ async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitM
   await debugShot(page, downloadDir, "03a-filtro-mes-expandido");
 
   const weekItem = frame.locator(`.slicerItemContainer[title="${semana}"][aria-level="3"]`);
+  await scrollWeekIntoView(frame, page, weekItem, downloadDir, waitMultiplier);
   await weekItem.locator(".slicerCheckbox").click();
   await page.waitForTimeout(1500 * waitMultiplier);
   await debugShot(page, downloadDir, "03-filtro-semana");

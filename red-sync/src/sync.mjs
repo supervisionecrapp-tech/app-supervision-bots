@@ -2,18 +2,19 @@ import { mkdirSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { scrapeRedExport } from "./scrape.mjs";
 import { uploadRedFile } from "./upload.mjs";
-import { getIsoWeek, isoWeekMonday } from "./isoWeek.mjs";
+import { getIsoWeek, isoWeekOwnerMonth, isoWeekThursday } from "./isoWeek.mjs";
 
-// El "mes" tiene que ser el mes del LUNES de la semana, no el mes
+// El "mes" tiene que ser el mes del JUEVES de la semana, no el mes
 // calendario de "hoy" — Datawalt agrupa las semanas del árbol de filtro
-// por el mes de su lunes (ver isoWeekMonday/firstIsoWeekOfMonth), y cerca
-// de fin de mes eso puede diferir de now.getMonth(). Ej.: si hoy es
-// martes 1 de septiembre pero el lunes de la semana actual fue 31 de
-// agosto, la semana sigue agrupada bajo Agosto en el filtro.
+// por el mes de su jueves (ver isoWeekOwnerMonth en isoWeek.mjs, y su
+// comentario sobre por qué NO es el lunes), y cerca de fin de mes eso
+// puede diferir de now.getMonth(). Ej.: semana 36/2026 tiene lunes 31 de
+// agosto pero jueves 3 de septiembre — Datawalt la agrupa bajo Septiembre.
 function weekParamsFor(date) {
   const { anio: isoYear, semana } = getIsoWeek(date);
-  const monday = isoWeekMonday(isoYear, semana);
-  return { anio: monday.getUTCFullYear(), mes: monday.getUTCMonth() + 1, semana };
+  const mes = isoWeekOwnerMonth(isoYear, semana);
+  const anio = isoWeekThursday(isoYear, semana).getUTCFullYear();
+  return { anio, mes, semana };
 }
 
 function readArgs() {

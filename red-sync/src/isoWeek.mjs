@@ -18,15 +18,33 @@ export function isoWeekMonday(anio, semana) {
   return monday;
 }
 
+/** Jueves (UTC) de una semana ISO dada — ver comentario de isoWeekOwnerMonth. */
+export function isoWeekThursday(anio, semana) {
+  const monday = isoWeekMonday(anio, semana);
+  const thursday = new Date(monday);
+  thursday.setUTCDate(monday.getUTCDate() + 3);
+  return thursday;
+}
+
 // El árbol de filtro de Datawalt agrupa las semanas bajo el mes de SU
-// LUNES, no bajo el mes del día 1 — verificado en vivo: la semana 31/2026
-// (27 jul - 2 ago) aparece bajo Julio, no Agosto, aunque getIsoWeek(1 de
-// agosto) devuelva 31. Sin este ajuste, selectWeek() en scrape.mjs cuenta
-// mal cuántas filas hay que bajar dentro del mes expandido.
+// JUEVES (la misma convención de ISO-8601 que ya usa getIsoWeek para el
+// año — d.setUTCDate(... + 4 - dayNum) ahí arriba apunta al jueves), NO
+// bajo el mes de su lunes. Se creyó lo contrario y quedó así documentado
+// hasta que un backfill real de las semanas 27-39/2026 lo desmintió: la
+// semana 36/2026 (lunes 31/ago, jueves 3/sep) falló SIEMPRE al buscarla
+// bajo Agosto porque Datawalt la tiene bajo Septiembre — confirmado
+// mirando el árbol expandido real (debug-03a-filtro-mes-expandido.png de
+// la corrida 36054215562: Agosto solo lista semanas 32-35). La semana
+// 31/2026 (lunes 27/jul, jueves 30/jul) no lo delataba antes porque ahí
+// lunes y jueves caen en el mismo mes — coincidencia, no evidencia de la
+// regla real.
+export function isoWeekOwnerMonth(anio, semana) {
+  return isoWeekThursday(anio, semana).getUTCMonth() + 1;
+}
+
 export function firstIsoWeekOfMonth(anio, mes) {
   const day1 = new Date(anio, mes - 1, 1);
   let { semana, anio: weekYear } = getIsoWeek(day1);
-  const monday = isoWeekMonday(weekYear, semana);
-  if (monday.getUTCMonth() + 1 !== mes) semana += 1;
+  if (isoWeekOwnerMonth(weekYear, semana) !== mes) semana += 1;
   return semana;
 }
