@@ -120,9 +120,12 @@ export async function sync(supabase, { desde, hasta }) {
 
   // Reconciliación: si alguien que ya estaba guardado como ausente en este
   // rango dejó de aparecer como tal en esta corrida (marcó, le aprobaron un
-  // permiso después, o el turno se movió), la fila vieja se borra siempre
-  // — no debe quedar una ausencia fantasma en cbtrs_ausencias solo porque
-  // ya tenía cobertura asignada.
+  // permiso después, o el turno se movió), la fila vieja se borra — salvo
+  // que ya tenga un cbtrs_turnos_sugeridos apuntándole (ausencia_id NOT
+  // NULL): borrarla ahí viola esa foreign key, y al ser un solo DELETE ...
+  // WHERE id IN (...), UNA fila así tumba el lote entero (23503, confirmado
+  // en producción vía la Edge Function gemela). Se protegen esas filas en
+  // vez de arriesgar el resto del sync por ellas.
   const { data: existentes, error: existError } = await supabase
     .from("cbtrs_ausencias")
     .select("id, rut, fecha")
@@ -133,13 +136,24 @@ export async function sync(supabase, { desde, hasta }) {
   const idsABorrar = (existentes ?? [])
     .filter((e) => !clavesAConservar.has(`${normalizeRut(e.rut)}|${e.fecha}`))
     .map((e) => e.id);
+  let borradas = 0;
   if (idsABorrar.length > 0) {
-    const { error: delError } = await supabase.from("cbtrs_ausencias").delete().in("id", idsABorrar);
-    if (delError) throw new Error(delError.message);
+    const { data: referenciadas, error: refError } = await supabase
+      .from("cbtrs_turnos_sugeridos")
+      .select("ausencia_id")
+      .in("ausencia_id", idsABorrar);
+    if (refError) throw new Error(refError.message);
+    const idsReferenciados = new Set((referenciadas ?? []).map((r) => r.ausencia_id));
+    const idsABorrarSeguro = idsABorrar.filter((id) => !idsReferenciados.has(id));
+    if (idsABorrarSeguro.length > 0) {
+      const { error: delError } = await supabase.from("cbtrs_ausencias").delete().in("id", idsABorrarSeguro);
+      if (delError) throw new Error(delError.message);
+    }
+    borradas = idsABorrarSeguro.length;
   }
 
   const sinAsignacion = filasParaGuardar.filter((f) => f.sala_id == null).length;
-  return { activos: activeUsers.length, ausencias: filasParaGuardar.length, sinAsignacion, borradas: idsABorrar.length };
+  return { activos: activeUsers.length, ausencias: filasParaGuardar.length, sinAsignacion, borradas };
 }
 
 export async function logRun(supabase, { bot, startedAt, status, errorMessage, filasCargadas }) {
