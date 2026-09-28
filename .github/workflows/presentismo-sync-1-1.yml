@@ -31,6 +31,12 @@ on:
     - cron: "38 18 * * *"
     - cron: "36 20 * * *"
     - cron: "6 21 * * *"
+    # Lunes 8:00 Chile = 12:00 UTC (sin horario de verano, ver arriba).
+    # A pedido del usuario: recarga la semana completa (lunes a domingo
+    # anteriores) además de las corridas normales de arriba, que sólo
+    # traen "ayer". El paso "Sync" detecta este cron por su expresión
+    # exacta y calcula DESDE/FECHA para cubrir la semana pasada entera.
+    - cron: "0 12 * * 1"
   workflow_dispatch:
     inputs:
       fecha:
@@ -68,9 +74,12 @@ jobs:
     # La variable PRESENTISMO_RUNNER se respeta por si algún día conviene un
     # runner propio, pero ya no hace falta.
     runs-on: ${{ vars.PRESENTISMO_RUNNER || 'ubuntu-latest' }}
-    # 5: con una sola tirada una corrida sana tarda 2-3 min (setup
-    # incluido). Si se cuelga, corta rapido en vez de quemar minutos.
-    timeout-minutes: 5
+    # 7: con una sola tirada una corrida sana tarda 2-3 min (setup
+    # incluido); la corrida semanal de los lunes exporta y sube 7 días en
+    # vez de 1 (más filas, mismo flujo por lotes de 1000 en upload.py), así
+    # que le suma un margen chico. Si se cuelga, corta rapido en vez de
+    # quemar minutos.
+    timeout-minutes: 7
     defaults:
       run:
         working-directory: presentismo-sync
@@ -151,8 +160,19 @@ jobs:
           MOTOR: ${{ github.event.inputs.motor || 'camoufox' }}
           FECHA: ${{ github.event.inputs.fecha }}
           DESDE: ${{ github.event.inputs.desde }}
+          CRON_SCHEDULE: ${{ github.event.schedule }}
         shell: bash
         run: |
+          # Corrida semanal de los lunes ("0 12 * * 1" = 8:00 Chile): pisa
+          # FECHA/DESDE para traer la semana completa anterior (lunes a
+          # domingo) en vez de sólo "ayer". Las demás corridas (normales o
+          # workflow_dispatch) no tocan esto.
+          if [ "$CRON_SCHEDULE" = "0 12 * * 1" ]; then
+            FECHA=$(date -u -d 'yesterday' +%Y-%m-%d)
+            DESDE=$(date -u -d '7 days ago' +%Y-%m-%d)
+            export FECHA DESDE
+            echo "Corrida semanal de los lunes: recargando semana completa ${DESDE} a ${FECHA}"
+          fi
           if [ "$RUNNER_OS" = "Linux" ]; then
             xvfb-run -a --server-args="-screen 0 1920x1080x24" python -u src/sync_login.py
           else
