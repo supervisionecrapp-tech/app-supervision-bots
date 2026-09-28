@@ -1,0 +1,70 @@
+name: Presentismo Refresh Manual
+
+# Disparado únicamente por el botón "Refrescar WM" del panel admin
+# (panel-cliente.html → Edge Function presentismo-refresh), nunca por
+# cron. Es un workflow aparte de presentismo-sync-1-1.yml a propósito: ese
+# tiene su propio gate de "¿hace falta correr?" pensado para el patrón de
+# reintento del cron (ventana de 45 min), que acá no aplica — el cooldown
+# de 2h para este botón lo decide la Edge Function ANTES de llamar a este
+# workflow, no un paso de acá. Corre los mismos pasos que el sync normal y
+# escribe en las mismas tablas (bot_runs con bot="presentismo-sync",
+# presentismo_registros) para que el resto del panel (incluida la
+# pestaña Bots) no tenga que distinguir el origen de la corrida.
+on:
+  workflow_dispatch:
+
+# Mismo grupo que presentismo-sync-1-1.yml: si el cron está corriendo
+# cuando alguien aprieta el botón, se encola en vez de pisarlo (el portal
+# de origen no tolera sesiones simultáneas de la misma cuenta).
+concurrency:
+  group: presentismo-sync
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ${{ vars.PRESENTISMO_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 7
+    defaults:
+      run:
+        working-directory: presentismo-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - run: scrapling install
+
+      - run: python -m camoufox fetch
+
+      - name: Instalar xvfb y xdotool
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y xvfb xdotool
+
+      - name: Sync
+        env:
+          FRAX_USER: ${{ secrets.FRAX_USER }}
+          FRAX_PASS: ${{ secrets.FRAX_PASS }}
+          FRAX_USUARIO_V2: ${{ secrets.FRAX_USUARIO_V2 }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FRAX_PROXY: ${{ secrets.FRAX_PROXY }}
+          MOTOR: camoufox
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a --server-args="-screen 0 1920x1080x24" python -u src/sync_login.py
+          else
+            python -u src/sync_login.py
+          fi
+
+      - name: Subir pantallazos de diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: presentismo-refresh-manual-screenshots-${{ github.run_id }}-${{ github.run_attempt }}
+          path: presentismo-sync/downloads/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
