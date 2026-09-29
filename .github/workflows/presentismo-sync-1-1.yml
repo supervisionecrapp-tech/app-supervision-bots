@@ -1,42 +1,13 @@
 name: Presentismo Sync 1.1
 
 on:
-  schedule:
-    # A partir del 29/08/2026, mismo horario que smu-presentismo-sync.yml
-    # a propósito (a pedido explícito del usuario) — 4 veces al día, 10:00
-    # a 16:00 Chile = 14,16,18,20 UTC (Chile continental es UTC-4 fijo, sin
-    # horario de verano).
-    #
-    # El 28/08 corrió cada 1 hora (18/día) para probar la cookie de sesión
-    # + el keepalive de Supabase (presentismo-keepalive, cada 10 min) recién
-    # armados — con eso confirmado, no hace falta esa frecuencia: con la
-    # cookie cada corrida exitosa tarda ~1-2 min (sin login, sin esperar al
-    # solver de Turnstile), muy por debajo de los ~1.820 min/mes que
-    # consumían las 18 corridas/día de la época con login normal.
-    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
-    # Minutos irregulares a propósito. Antes era "0 14,16,18,20", o sea
-    # cuatro consultas clavadas en la hora en punto, todos los días: nadie
-    # revisa un reporte así. Se mantiene la misma ventana (10:00 a 16:00
-    # Chile) pero sin la cadencia de reloj.
-    # Cada ventana tiene su horario principal y UN reintento a +30 min.
-    # El reintento no es una corrida completa: el primer paso consulta
-    # bot_runs y, si ya hubo una corrida exitosa en los ultimos 45 min,
-    # el job termina en segundos sin instalar nada. Asi el "temporizador
-    # de 30 min" no cuesta minutos cuando no hace falta.
-    - cron: "13 14 * * *"
-    - cron: "43 14 * * *"
-    - cron: "47 16 * * *"
-    - cron: "17 17 * * *"
-    - cron: "8 18 * * *"
-    - cron: "38 18 * * *"
-    - cron: "36 20 * * *"
-    - cron: "6 21 * * *"
-    # Lunes 8:00 Chile = 12:00 UTC (sin horario de verano, ver arriba).
-    # A pedido del usuario: recarga la semana completa (lunes a domingo
-    # anteriores) además de las corridas normales de arriba, que sólo
-    # traen "ayer". El paso "Sync" detecta este cron por su expresión
-    # exacta y calcula DESDE/FECHA para cubrir la semana pasada entera.
-    - cron: "0 12 * * 1"
+  # Sin `schedule`: el reloj de GitHub descartaba o atrasaba corridas (desde el
+  # 27/09). Lo dispara pg_cron de Supabase por workflow_dispatch, ver
+  # supabase/migrations/20260929150000_cron_dispatch_bots_github.sql (8
+  # horarios diarios + lunes 08:00 Chile con la semana completa). El
+  # reintento a +30 min lo resuelve esa funcion mirando bot_runs; el paso
+  # "¿Hace falta correr?" de abajo solo aplica a event_name = schedule y ya
+  # no se ejecuta.
   workflow_dispatch:
     inputs:
       fecha:
