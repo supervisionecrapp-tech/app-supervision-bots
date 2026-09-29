@@ -1,11 +1,10 @@
 name: SMU Presentismo Sync 1.1
 
 on:
-  schedule:
-    # Cada 2 horas, 10:00 a 16:00 Chile: 10,12,14,16 Chile = 14,16,18,20 UTC
-    # (Chile continental es UTC-4 fijo, sin horario de verano.)
-    # reprocesado 2026-08-28 20:00 UTC — forzar re-registro del schedule tras bloqueo de cuenta nueva
-    - cron: "0 14,16,18,20 * * *"
+  # Sin `schedule`: el reloj de GitHub descartaba corridas (desde el 27/09).
+  # Lo dispara pg_cron de Supabase por workflow_dispatch, ver
+  # supabase/migrations/20260929150000_cron_dispatch_bots_github.sql
+  # (SMU Presentismo: 10,12,14,16 Chile; horarios en UTC en esa migracion).
   workflow_dispatch:
     inputs:
       fecha:

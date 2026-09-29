@@ -1,20 +1,10 @@
 name: Teamcore Sync 1.1
 
 on:
-  schedule:
-    # Cada 2 horas, 11:00 a 19:00 Chile: 11,13,15,17,19 Chile = 15,17,19,21,23 UTC
-    # (Chile continental es UTC-4 fijo, sin horario de verano.)
-    #
-    # Workflow "1.1": archivo nuevo (no un rename), creado 28/08/2026 tras
-    # activar 2FA en la cuenta supervisionecrapp-tech, para descartar que
-    # `schedule` estuviera bloqueado por "registro viejo" del workflow.
-    # Probado cada 1 min con ID de workflow nuevo (344911120) + 2FA activo:
-    # 5+ min, CERO triggers — mismo resultado que las pruebas anteriores
-    # (cuenta vieja, sin 2FA, workflow original). Descarta ambas hipótesis;
-    # el bloqueo de `schedule` no depende del workflow ni del 2FA. Sigue
-    # pendiente: ticket a GitHub Support. Hasta que se resuelva, estos bots
-    # solo corren por workflow_dispatch manual.
-    - cron: "0 15,17,19,21,23 * * *"
+  # Sin `schedule`: el reloj de GitHub descartaba corridas (desde el 27/09).
+  # Lo dispara pg_cron de Supabase por workflow_dispatch, ver
+  # supabase/migrations/20260929150000_cron_dispatch_bots_github.sql
+  # (Teamcore: 11,13,15,17,19 Chile; horarios en UTC en esa migracion).
   workflow_dispatch:
     inputs:
       fecha:
