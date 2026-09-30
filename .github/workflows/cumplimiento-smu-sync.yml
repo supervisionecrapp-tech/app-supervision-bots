@@ -1,0 +1,40 @@
+name: Cumplimiento SMU Sync
+
+on:
+  # Sólo manual por ahora; falta decidir el horario y agregar el disparo por
+  # pg_cron (ver supabase/migrations/20260929150000_cron_dispatch_bots_github.sql).
+  workflow_dispatch:
+    inputs:
+      desde:
+        description: "YYYY-MM-DD (vacío = ayer)"
+        required: false
+      hasta:
+        description: "YYYY-MM-DD (vacío = hoy)"
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: cumplimiento-smu-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      # Portal "GeoVictoria Externos" de SMU, reporte "Cumplimiento Agencias"
+      # (todo con fetch, ver src/scrape.mjs).
+      - name: Sync Cumplimiento SMU
+        env:
+          DESDE: ${{ github.event.inputs.desde }}
+          HASTA: ${{ github.event.inputs.hasta }}
+          SMU_GV_USER: ${{ secrets.SMU_GV_USER }}
+          SMU_GV_PASS: ${{ secrets.SMU_GV_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync
