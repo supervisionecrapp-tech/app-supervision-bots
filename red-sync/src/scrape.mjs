@@ -227,10 +227,10 @@ export async function scrapeRedExport({
 // Secuencia (igual que antes, ahora con selectores en vez de píxeles):
 //  1. Abrir el dropdown (esto sigue siendo coordenada: el control que lo
 //     abre es el mismo tipo de shape sin selector que RED/Detalle).
-//  2. El estado default de una sesión nueva viene con el AÑO actual ya
-//     marcado (ni "todo" ni "nada") — un click en "Seleccionar todo" lo
-//     COMPLETA a todo marcado; hace falta un SEGUNDO click para vaciarlo
-//     del todo y partir limpio. Contraintuitivo pero así se comporta.
+//  2. Vaciar el árbol: el estado inicial NO es fijo (antes venía con el año
+//     a medias, ahora con todo marcado), y "Seleccionar todo" alterna
+//     nada→todo / parcial→todo / todo→nada. Por eso se lee el estado y se
+//     clickea hasta que quede en "none" (ver checkboxState).
 //  3. Expandir el año buscado (chevron) → aparecen sus meses.
 //  4. Expandir el mes buscado (chevron) → aparecen sus semanas.
 //  5. Marcar el checkbox de la semana buscada.
@@ -272,11 +272,19 @@ async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitM
   await page.mouse.click(WEEK_FILTER_DROPDOWN.x, WEEK_FILTER_DROPDOWN.y);
   await page.waitForTimeout(1000 * waitMultiplier);
 
+  // Vaciar el árbol mirando el estado real, NO con un número fijo de clicks:
+  // el reporte llegó a abrir con todo marcado ("Todas"), y los dos clicks
+  // fijos de antes lo vaciaban y lo volvían a llenar, así que el click en
+  // la semana buscada terminaba DESMARCÁNDOLA (se exportaba todo menos esa
+  // semana y se cargaba mezclado bajo su número).
   const selectAll = frame.locator('.slicerItemContainer[title="Seleccionar todo"] .slicerCheckbox');
-  await selectAll.click();
-  await page.waitForTimeout(500 * waitMultiplier);
-  await selectAll.click();
-  await page.waitForTimeout(500 * waitMultiplier);
+  for (let intento = 0; intento < 4; intento++) {
+    const estado = await checkboxState(selectAll);
+    console.log(`Filtro de semana — "Seleccionar todo": ${estado}`);
+    if (estado === "none") break;
+    await selectAll.click();
+    await page.waitForTimeout(700 * waitMultiplier);
+  }
 
   const yearItem = frame.locator(`.slicerItemContainer[title="${anio}"][aria-level="1"]`);
   await yearItem.locator(".expandButton").click();
@@ -292,10 +300,52 @@ async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitM
   await weekItem.locator(".slicerCheckbox").click();
   await page.waitForTimeout(1500 * waitMultiplier);
   await debugShot(page, downloadDir, "03-filtro-semana");
+  await verifyOnlyWeekSelected(frame, { mes, semana });
 
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500 * waitMultiplier);
   await cerrarDropdownSemana(frame, page, downloadDir, waitMultiplier);
+}
+
+// Estado de un .slicerCheckbox de Power BI: "all" (marcado), "partial"
+// (algún hijo marcado) o "none". Se lee de las clases `selected` /
+// `partiallySelected` del propio checkbox.
+async function checkboxState(checkbox) {
+  const cls = (await checkbox.first().getAttribute("class").catch(() => "")) || "";
+  if (/\bpartiallySelected\b/.test(cls)) return "partial";
+  if (/\bselected\b/.test(cls)) return "all";
+  return "none";
+}
+
+// Red de seguridad: antes de exportar, la semana pedida tiene que ser la
+// ÚNICA marcada. Si no, se aborta — es preferible una corrida en rojo a
+// cargar en Supabase números de otras semanas con la etiqueta de ésta.
+async function verifyOnlyWeekSelected(frame, { mes, semana }) {
+  const problemas = [];
+  const semanaEstado = await checkboxState(
+    frame.locator(`.slicerItemContainer[title="${semana}"][aria-level="3"] .slicerCheckbox`),
+  );
+  if (semanaEstado !== "all") problemas.push(`la semana ${semana} quedó "${semanaEstado}"`);
+
+  // Todo lo que esté visible en el árbol, salvo esa semana y su mes, debe
+  // estar vacío (otras semanas y otros meses).
+  for (const nivel of [2, 3]) {
+    const items = frame.locator(`.slicerItemContainer[aria-level="${nivel}"]`);
+    const n = await items.count();
+    for (let i = 0; i < n; i++) {
+      const item = items.nth(i);
+      const titulo = await item.getAttribute("title");
+      if (nivel === 2 && titulo === String(mes)) continue;
+      if (nivel === 3 && titulo === String(semana)) continue;
+      const estado = await checkboxState(item.locator(".slicerCheckbox"));
+      if (estado !== "none") problemas.push(`${nivel === 2 ? "mes" : "semana"} ${titulo} está "${estado}"`);
+    }
+  }
+
+  if (problemas.length > 0) {
+    throw new Error(`Filtro de semana incorrecto para la semana ${semana}: ${problemas.join("; ")}`);
+  }
+  console.log(`Filtro de semana verificado: solo la semana ${semana} marcada.`);
 }
 
 // El Escape de arriba NO cierra el dropdown del filtro (confirmado en la
