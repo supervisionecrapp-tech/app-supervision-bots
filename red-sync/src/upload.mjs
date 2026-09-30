@@ -63,6 +63,34 @@ export async function uploadRedFile({ filePath, categoria, anio, semana, supabas
   const { error } = await supabase.from(table).upsert(upsertRows, { onConflict: "sala_id,anio,semana" });
   if (error) throw new Error(`${table}: ${error.message}`);
 
+  // El upsert solo pisa/agrega: una sala que quedó de una carga anterior y
+  // ya no viene en el export se quedaba para siempre con datos que el BI
+  // no tiene (así sobraron salas en semanas cargadas con el filtro roto).
+  // Se borran las de esta semana que no vinieron — solo si el export trajo
+  // algo, para que un export vacío nunca vacíe la semana.
+  let eliminadas = 0;
+  if (upsertRows.length > 0) {
+    const vienen = new Set(upsertRows.map((r) => r.sala_id));
+    const { data: existentes, error: exErr } = await supabase
+      .from(table)
+      .select("sala_id")
+      .eq("anio", anio)
+      .eq("semana", semana);
+    if (exErr) throw new Error(`${table}: ${exErr.message}`);
+    const sobrantes = existentes.map((e) => e.sala_id).filter((id) => !vienen.has(id));
+    if (sobrantes.length > 0) {
+      const { error: delErr } = await supabase
+        .from(table)
+        .delete()
+        .eq("anio", anio)
+        .eq("semana", semana)
+        .in("sala_id", sobrantes);
+      if (delErr) throw new Error(`${table}: ${delErr.message}`);
+      eliminadas = sobrantes.length;
+      console.log(`Se eliminaron ${eliminadas} salas de ${table} (semana ${semana}) que el BI ya no trae.`);
+    }
+  }
+
   await supabase.from("cargas_red").insert({
     categoria,
     anio,
@@ -73,5 +101,5 @@ export async function uploadRedFile({ filePath, categoria, anio, semana, supabas
     filas_descartadas: descartadas,
   });
 
-  return { total: rows.length, cargadas: upsertRows.length, descartadas };
+  return { total: rows.length, cargadas: upsertRows.length, descartadas, eliminadas };
 }
