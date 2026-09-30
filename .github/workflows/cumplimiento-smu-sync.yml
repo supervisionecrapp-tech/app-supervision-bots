@@ -1,8 +1,8 @@
 name: Cumplimiento SMU Sync
 
 on:
-  # Sólo manual por ahora; falta decidir el horario y agregar el disparo por
-  # pg_cron (ver supabase/migrations/20260929150000_cron_dispatch_bots_github.sql).
+  # Sin `schedule`: lo dispara pg_cron de Supabase a las 4 horas principales de
+  # Presentismo WM, ver supabase/migrations/20260929210000_cron_cumplimiento_smu_horarios_wm.sql
   workflow_dispatch:
     inputs:
       desde:

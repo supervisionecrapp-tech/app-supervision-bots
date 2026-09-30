@@ -4,7 +4,7 @@ on:
   # Sin `schedule`: el reloj de GitHub descartaba corridas (desde el 27/09).
   # Lo dispara pg_cron de Supabase por workflow_dispatch, ver
   # supabase/migrations/20260929150000_cron_dispatch_bots_github.sql
-  # (SMU Presentismo: 10,12,14,16 Chile; horarios en UTC en esa migracion).
+  # (SMU Presentismo: mismas 4 horas principales de WM, ver 20260929210000_cron_cumplimiento_smu_horarios_wm.sql).
   workflow_dispatch:
     inputs:
       fecha:
