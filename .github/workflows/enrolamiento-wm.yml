@@ -1,0 +1,57 @@
+name: Enrolamiento WM
+
+# Enrola en Walmart (APE2/FRAX) a los mercaderistas de GeoVictoria: arma la
+# planilla con turnos_colaboradores y la sube por "Registro Excel". Reusa el
+# login de presentismo-sync (misma cuenta, mismo Camoufox), ver
+# presentismo-sync/src/enrolar_wm.py.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Solo arma el Excel, no abre el portal."
+        required: false
+        default: false
+        type: boolean
+
+# La misma cuenta del portal no tolera sesiones simultáneas (ver el comentario
+# de presentismo-sync-1-1.yml): comparte grupo con presentismo para que no se
+# pisen.
+concurrency:
+  group: presentismo-sync
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: presentismo-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: scrapling install
+      - run: python -m camoufox fetch
+      - name: Instalar xvfb y xdotool
+        run: sudo apt-get install -y xvfb xdotool
+      - name: Enrolar
+        env:
+          FRAX_USER: ${{ secrets.FRAX_USER }}
+          FRAX_PASS: ${{ secrets.FRAX_PASS }}
+          FRAX_USUARIO_V2: ${{ secrets.FRAX_USUARIO_V2 }}
+          FRAX_PROXY: ${{ secrets.FRAX_PROXY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MOTOR: camoufox
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
+        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" python -u src/enrolar_wm.py
+      - name: Subir pantallazos de diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enrolamiento-wm-screenshots-${{ github.run_id }}
+          path: presentismo-sync/downloads/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14

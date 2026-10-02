@@ -50,6 +50,18 @@ function soloFecha(contractDate) {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
+// LastName de GV trae ambos apellidos juntos: paterno = hasta el primer
+// espacio, materno = todo lo que sigue (aunque el paterno quede como "DE").
+function partirNombre(u) {
+  const apellidos = (u.LastName ?? "").trim();
+  const i = apellidos.indexOf(" ");
+  return {
+    nombres: (u.Name ?? "").trim() || null,
+    apellido_paterno: (i === -1 ? apellidos : apellidos.slice(0, i)) || null,
+    apellido_materno: i === -1 ? null : apellidos.slice(i + 1).trim() || null,
+  };
+}
+
 const UPSERT_BATCH = 500;
 // Ventana simétrica ±15 días (antes 30 solo hacia atrás) — el caso que
 // faltaba: alguien con fecha de contrato a futuro (ingresa en los
@@ -111,6 +123,7 @@ async function sync(supabase) {
     return {
       rut: u.Identifier,
       nombre: `${u.Name ?? ""} ${u.LastName ?? ""}`.trim(),
+      ...partirNombre(u),
       grupo_gv: grupoPorRut.get(rutNormalizado)?.grupo ?? null,
       cargo: datos?.cargo ?? null,
       fecha_contrato: datos?.fechaContrato ?? null,

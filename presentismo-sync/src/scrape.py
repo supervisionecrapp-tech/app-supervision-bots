@@ -352,7 +352,7 @@ def _login_camoufox(interactuar, intento, downloaded_path, *, proxy: str | None,
                 break
 
 
-def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None, cf_clearance: str | None = None, fecha_fi: dt.date | None = None, proxy: str | None = None) -> Path:
+def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: str, download_dir: Path, session_cookie: str | None = None, cf_clearance: str | None = None, fecha_fi: dt.date | None = None, proxy: str | None = None, accion_post_login=None) -> Path:
     """Loguea, filtra el rango de fechas y descarga el Excel de "Detalle de
     marcas". `fecha_ff` es la fecha que queda en el campo "hasta" (se deja
     tal cual la trae el portal si no se toca; acá se pasa explícita para
@@ -456,7 +456,7 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
                 return page
             print(f"Login habilitado por: {via}.")
             captura(page, f"01d_captcha_ok_por_{via}")
-            _interactuar_paso(page, captura, downloaded_path, frax_user=frax_user, frax_pass=frax_pass, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir)
+            _interactuar_paso(page, captura, downloaded_path, frax_user=frax_user, frax_pass=frax_pass, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir, accion=accion_post_login)
         except Exception:
             captura(page, "error_fatal")
             raise
@@ -622,7 +622,7 @@ def scrape_presentismo_export(*, fecha_ff: dt.date, frax_user: str, frax_pass: s
     return downloaded_path["path"]
 
 
-def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pass: str, fecha_fi: dt.date, fecha_ff: dt.date, download_dir: Path) -> None:
+def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pass: str, fecha_fi: dt.date, fecha_ff: dt.date, download_dir: Path, accion=None) -> None:
     # NO volver a navegar a login.php. `StealthyFetcher.fetch()` ya cargó
     # esa misma URL y su solver corrió ANTES de este page_action (la doc
     # de Scrapling: page_action se ejecuta después de la navegación y del
@@ -680,6 +680,13 @@ def _interactuar_paso(page, captura, downloaded_path, *, frax_user: str, frax_pa
         captura(page, "02_login_rechazado")
         raise RuntimeError(f"El login no llegó a index.php (quedó en {page.url}).")
     captura(page, "03_index_ok")
+    if accion is not None:
+        # Otro flujo que reusa este login (ej. enrolar_wm.py): reemplaza a
+        # la exportación. "path" es solo el marcador de que el flujo llegó
+        # al final, que es lo que mira el llamador.
+        accion(page, captura)
+        downloaded_path["path"] = download_dir
+        return
     _exportar(page, captura, downloaded_path, fecha_fi=fecha_fi, fecha_ff=fecha_ff, download_dir=download_dir)
 
 
