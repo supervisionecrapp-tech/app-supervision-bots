@@ -10,11 +10,14 @@ on:
       fecha:
         description: "YYYY-MM-DD (vacío = hoy)"
         required: false
+      dias_atras:
+        description: "Días anteriores a repasar además de la fecha (vacío = 2)"
+        required: false
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: smu-presentismo-sync
@@ -33,6 +36,7 @@ jobs:
       - name: Sync SMU Presentismo (Accesos)
         env:
           FECHA: ${{ github.event.inputs.fecha }}
+          DIAS_ATRAS: ${{ github.event.inputs.dias_atras }}
           SMU_GV_USER: ${{ secrets.SMU_GV_USER }}
           SMU_GV_PASS: ${{ secrets.SMU_GV_PASS }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
