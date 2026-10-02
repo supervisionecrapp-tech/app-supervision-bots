@@ -111,11 +111,11 @@ def leer_registrados(page, captura) -> set[str]:
     _marcar_sesion_humana(page, captura)
     # La tabla es DataTables con carga por AJAX (api_registrados.php): se pide
     # todo en una sola página y se espera a que el conteo se estabilice.
-    page.evaluate("$('table').DataTable().page.len(2000).draw()")
+    page.evaluate("mw:$('table').DataTable().page.len(2000).draw()")
     previo, estables = -1, 0
     for _ in range(40):
         page.wait_for_timeout(1500)
-        n, total = page.evaluate("(() => { const d = $('table').DataTable(); return [d.rows().count(), d.page.info().recordsDisplay]; })()")
+        n, total = page.evaluate("mw:(() => { const d = $('table').DataTable(); return [d.rows().count(), d.page.info().recordsDisplay]; })()")
         estables = estables + 1 if (n == previo and n > 0 and n >= total) else 0
         previo = n
         if estables >= 2:
@@ -123,7 +123,7 @@ def leer_registrados(page, captura) -> set[str]:
     else:
         raise RuntimeError(f"No se pudo leer la lista de registrados ({previo} filas)")
     ruts = page.evaluate(
-        "$('table').DataTable().rows().data().toArray().map(r => (JSON.stringify(r).match(/\\d{7,8}-?[\\dkK]/) || [''])[0])"
+        "mw:$('table').DataTable().rows().data().toArray().map(r => (JSON.stringify(r).match(/\\d{7,8}-?[\\dkK]/) || [''])[0])"
     )
     captura(page, "09_registrados_leidos")
     return {_norm_rut(r) for r in ruts if r}
