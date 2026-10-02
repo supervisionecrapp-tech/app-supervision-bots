@@ -122,7 +122,7 @@ def subir_excel(page, captura, archivo: Path, resultado: dict) -> None:
 
     page.set_input_files('input[type="file"]', str(archivo))
     captura(page, "11_archivo_adjunto")
-    page.click('button[type="submit"]:has-text("Guardar")')
+    page.get_by_role("button", name="Guardar").click()
     page.wait_for_url("**/lee_excel_chunks.php**", timeout=60000)
     captura(page, "12_lee_excel_chunks")
 
