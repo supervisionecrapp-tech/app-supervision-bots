@@ -89,9 +89,44 @@ def armar_excel(gente: list[dict], salida: Path) -> list[str]:
         for campo, v in zip(("NOMBRE", "APELLIDO PATERNO", "APELLIDO MATERNO"), fila[1:4]):
             if not v or len(v.replace(" ", "")) < 3 or not SOLO_LETRAS.fullmatch(v):
                 avisos.append(f"{rut}: {campo} = {v!r}")
+    # Sacar las filas sobrantes de la plantilla: el portal cuenta las filas
+    # de la hoja y por cada 100 hace una tanda, así que las ~300 vacías que
+    # trae la plantilla (hasta la 1001) son tandas de más.
+    ws.delete_rows(len(gente) + 2, MAX_FILAS + 5)
     salida.parent.mkdir(parents=True, exist_ok=True)
     wb.save(salida)
     return avisos
+
+
+def _norm_rut(r: str) -> str:
+    return r.replace(".", "").replace("-", "").strip().upper()
+
+
+def leer_registrados(page, captura) -> set[str]:
+    """RUTs que el portal ya tiene en la cuenta (Registrados), para no
+    volver a mandarlos: cada tanda demora y a esos no hay nada que agregarles."""
+    page.goto(f"{BASE_URL}/registrados.php?idpuesto=0")
+    page.wait_for_selector("table", timeout=30000)
+    _obtener_clearance(page, captura)
+    _marcar_sesion_humana(page, captura)
+    # La tabla es DataTables con carga por AJAX (api_registrados.php): se pide
+    # todo en una sola página y se espera a que el conteo se estabilice.
+    page.evaluate("$('table').DataTable().page.len(2000).draw()")
+    previo, estables = -1, 0
+    for _ in range(40):
+        page.wait_for_timeout(1500)
+        n, total = page.evaluate("(() => { const d = $('table').DataTable(); return [d.rows().count(), d.page.info().recordsDisplay]; })()")
+        estables = estables + 1 if (n == previo and n > 0 and n >= total) else 0
+        previo = n
+        if estables >= 2:
+            break
+    else:
+        raise RuntimeError(f"No se pudo leer la lista de registrados ({previo} filas)")
+    ruts = page.evaluate(
+        "$('table').DataTable().rows().data().toArray().map(r => (JSON.stringify(r).match(/\\d{7,8}-?[\\dkK]/) || [''])[0])"
+    )
+    captura(page, "09_registrados_leidos")
+    return {_norm_rut(r) for r in ruts if r}
 
 
 def _contadores(texto: str) -> dict[str, int]:
@@ -101,8 +136,9 @@ def _contadores(texto: str) -> dict[str, int]:
     return out
 
 
-def subir_excel(page, captura, archivo: Path, resultado: dict) -> None:
-    """Corre con la sesión ya abierta (index.php)."""
+def subir_excel(page, captura, gente: list[dict], archivo: Path, resultado: dict) -> None:
+    """Corre con la sesión ya abierta (index.php): lee los registrados, arma
+    el Excel solo con los que faltan y lo sube."""
     cerrar_impago = page.locator("#btnCerrarImpago")
     try:
         if cerrar_impago.is_visible(timeout=5000):
@@ -112,6 +148,19 @@ def subir_excel(page, captura, archivo: Path, resultado: dict) -> None:
         pass
 
     _pausa_humana(page, 2, 6, motivo="en el inicio")
+    registrados = leer_registrados(page, captura)
+    faltan = [p for p in gente if _norm_rut(p["rut"]) not in registrados]
+    resultado["roster"] = len(gente)
+    resultado["ya_registrados"] = len(gente) - len(faltan)
+    resultado["enviadas"] = len(faltan)
+    print(f"Roster {len(gente)}, ya registrados en el portal {len(gente) - len(faltan)}, a enviar {len(faltan)}.")
+    resultado["avisos"] = armar_excel(faltan, archivo)
+    for a in resultado["avisos"]:
+        print(f"  REVISAR {a}")
+    if not faltan:
+        resultado["contadores"] = {"ingresados": 0, "actualizados": 0, "errores": 0, "provisorios": 0, "ya_habilitadas": 0, "vacias": 0}
+        print("No falta nadie: no se sube nada.")
+        return
     page.goto(f"{BASE_URL}/sube_excel.php")
     page.wait_for_selector('input[type="file"]', timeout=30000)
     captura(page, "10_sube_excel")
@@ -162,10 +211,13 @@ def subir_excel(page, captura, archivo: Path, resultado: dict) -> None:
     filas = page.evaluate(
         "[...document.querySelectorAll('table tbody tr')].map(tr => [...tr.cells].map(c => c.innerText.trim()))"
     )
-    resultado["no_ok"] = [f for f in filas if len(f) >= 4 and not re.search(r"ACTUALIZADO|INGRESADO|VACIA|PROVISORIO", f[3].upper())]
+    # La tabla de detalle tiene 4 celdas (FILA, RUT, NOMBRE, ESTADO); la de
+    # "Muestra" tiene 5 y no entra.
+    filas = [f for f in filas if len(f) == 4]
+    resultado["no_ok"] = [f for f in filas if not re.search(r"ACTUALIZADO|INGRESADO|VACIA|PROVISORIO", f[3].upper())]
     resultado["estados"] = {}
     for f in filas:
-        if len(f) >= 4 and "VACIA" not in f[3].upper():
+        if "VACIA" not in f[3].upper():
             resultado["estados"][f[3]] = resultado["estados"].get(f[3], 0) + 1
 
 
@@ -195,12 +247,12 @@ def main() -> None:
 
     gente = leer_roster(supabase)
     archivo = download_dir / f"Enrolamiento_WM_{hoy}.xlsx"
-    avisos = armar_excel(gente, archivo)
-    print(f"Excel armado: {len(gente)} personas -> {archivo}")
-    for a in avisos:
-        print(f"  REVISAR {a}")
+    print(f"Roster de GeoVictoria en grupos de supervisor: {len(gente)} personas.")
     if os.environ.get("DRY_RUN"):
-        print("DRY_RUN: no se abre el portal.")
+        avisos = armar_excel(gente, archivo)
+        print(f"DRY_RUN: Excel de prueba con todo el roster ({len(gente)}) -> {archivo}; no se abre el portal.")
+        for a in avisos:
+            print(f"  REVISAR {a}")
         return
 
     resultado: dict = {}
@@ -213,19 +265,21 @@ def main() -> None:
             session_cookie=None,
             cf_clearance=None,
             proxy=os.environ.get("FRAX_PROXY"),
-            accion_post_login=lambda page, captura: subir_excel(page, captura, archivo, resultado),
+            accion_post_login=lambda page, captura: subir_excel(page, captura, gente, archivo, resultado),
         )
         c = resultado.get("contadores", {})
         if not c:
             raise RuntimeError("El portal no entregó contadores: no se puede confirmar la carga.")
         resumen = (
-            f"{len(gente)} enviadas · actualizados {c.get('actualizados', 0)}, ingresados {c.get('ingresados', 0)}, "
+            f"roster {resultado.get('roster', len(gente))}, ya registrados {resultado.get('ya_registrados', 0)}, "
+            f"enviadas {resultado.get('enviadas', 0)} · actualizados {c.get('actualizados', 0)}, ingresados {c.get('ingresados', 0)}, "
             f"provisorios {c.get('provisorios', 0)}, ya habilitadas {c.get('ya_habilitadas', 0)}, errores {c.get('errores', 0)}"
         )
         print(f"Listo: {resumen}")
         print(f"Estados por fila: {resultado.get('estados')}")
         for f in resultado.get("no_ok", []):
             print(f"  FILA NO OK: {f}")
+        avisos = resultado.get("avisos", [])
         problemas = bool(c.get("errores")) or bool(resultado.get("no_ok")) or bool(avisos)
         log_run(
             supabase, categoria=hoy, started_at=started_at, status="success",
