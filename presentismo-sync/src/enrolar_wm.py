@@ -26,6 +26,7 @@ import datetime as dt
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -127,8 +128,31 @@ def subir_excel(page, captura, archivo: Path, resultado: dict) -> None:
     captura(page, "12_lee_excel_chunks")
 
     # Etapa 2: acá recién se registra. Procesa en tandas de 100 por AJAX.
+    # Diagnóstico: el 02/10 el portal se colgó en la tanda 5 sin dar error.
+    page.on("response", lambda r: print(f"  [http {r.status}] {r.url[-70:]}") if r.status >= 400 else None)
+    page.on("requestfailed", lambda r: print(f"  [req fallida] {r.url[-70:]} {r.failure}"))
+    page.on("console", lambda m: print(f"  [console {m.type}] {m.text[:200]}") if m.type in ("error", "warning") else None)
     page.get_by_role("button", name="Iniciar procesamiento").click()
-    page.wait_for_function("document.body.innerText.includes('Procesamiento completo')", timeout=300000)
+    ultimo, desde = "", time.time()
+    while True:
+        estado = page.evaluate(
+            "(() => { const t = document.body.innerText; return [t.includes('Procesamiento completo'), (t.match(/Procesando tanda \\d+/)||[''])[0], (t.match(/[\\d.]+ de [\\d.]+/)||[''])[0]]; })()"
+        )
+        if estado[0]:
+            break
+        marca = f"{estado[1]} {estado[2]}"
+        if marca != ultimo:
+            print(f"  avance: {marca}")
+            ultimo, desde = marca, time.time()
+        elif time.time() - desde > 90:
+            captura(page, "13b_colgado")
+            print(f"  SIN AVANCE 90s en: {marca}")
+            filas = page.evaluate(
+                "[...document.querySelectorAll('table tbody tr')].slice(-6).map(tr => [...tr.cells].map(c => c.innerText.trim()).join(' | '))"
+            )
+            print(f"  últimas filas: {filas}")
+            raise RuntimeError(f"El portal se colgó procesando ({marca})")
+        page.wait_for_timeout(3000)
     page.wait_for_timeout(1000)
     captura(page, "13_procesamiento_completo")
 
