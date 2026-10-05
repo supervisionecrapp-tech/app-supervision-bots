@@ -55,8 +55,11 @@ export async function uploadDecReporte({ xlsxPath, supabaseUrl, supabaseServiceK
     docRows.push({
       nombre_documento: nombreDocumento,
       rut: rutRaw,
-      nombre_colaborador: persona.nombre,
-      cargo: persona.cargo,
+      // cargo y nombre_colaborador son NOT NULL, pero el roster GV puede traer
+      // colaboradores activos con cargo vacío (ej. RUT 217813336 el 04/10):
+      // un solo caso así tumbaba toda la carga.
+      nombre_colaborador: persona.nombre || rutRaw,
+      cargo: persona.cargo?.trim() || "SIN CARGO",
       is_part_time: esPartTime(persona.cargo),
       supervisor_nombre: persona.supervisorNombre,
       zona: persona.zona,
