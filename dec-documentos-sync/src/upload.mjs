@@ -200,18 +200,23 @@ async function buildResolver(supabase) {
     const rutNorm = normalizeRut(rutRaw);
 
     const asignacion = mejorAsignacionPorRut.get(rutNorm);
+    const turno = turnosPorRut.get(rutNorm);
     if (asignacion) {
       const sala = salaById.get(asignacion.sala_id);
+      // Una asignación vigente puede venir sin sala (ej. la nueva de Cobertura
+      // todavía sin completar): en ese caso el supervisor y la zona salen del
+      // grupo de GeoVictoria, igual que en el nivel 2, en vez de quedar vacíos.
+      const salaGv = !sala && turno ? salaByGrupoGvId.get(grupoGvIdByNombre.get(turno.grupo_gv)) : null;
+      const salaRef = sala ?? salaGv;
       return {
         nombre: asignacion.nombre_completo,
         cargo: asignacion.cargo,
-        supervisorNombre: sala ? profileNombreById.get(sala.supervisor_id) ?? null : null,
-        zona: sala ? zonaNombreById.get(sala.zona_id) ?? null : null,
+        supervisorNombre: salaRef ? profileNombreById.get(salaRef.supervisor_id) ?? null : null,
+        zona: salaRef ? zonaNombreById.get(salaRef.zona_id) ?? null : null,
         sap: sala ? sala.sap : null,
       };
     }
 
-    const turno = turnosPorRut.get(rutNorm);
     if (turno) {
       const grupoId = grupoGvIdByNombre.get(turno.grupo_gv);
       const sala = grupoId ? salaByGrupoGvId.get(grupoId) : null;
