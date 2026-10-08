@@ -66,6 +66,15 @@ export async function scrapeCausasQuiebre({
     await page.waitForTimeout(800);
     await debugShot(page, downloadDir, "04-tabla");
 
+    // La tabla llega colapsada a nivel Sala (⊞ en cada fila): "Expandir al
+    // siguiente nivel" (el mismo drill-down-level-btn de Red) la baja a SKU
+    // para todas las salas a la vez. Sin esto el export no trae Sku-Item.
+    await frame.locator('[data-testid="drill-down-level-btn"]:visible').first().click();
+    await page.waitForTimeout(5000 * waitMultiplier);
+    await debugShot(page, downloadDir, "04b-tabla-expandida");
+    await tabla.hover();
+    await page.waitForTimeout(800);
+
     await frame.locator('[data-testid="visual-more-options-btn"]:visible').first().click();
     await page.waitForTimeout(1500);
     await debugShot(page, downloadDir, "05a-menu-abierto");
