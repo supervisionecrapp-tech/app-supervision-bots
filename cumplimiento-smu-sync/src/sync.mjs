@@ -53,7 +53,7 @@ async function main() {
       return uploadCumplimientoFile({ filePath, supabaseUrl, supabaseServiceKey });
     });
     console.log(
-      `Listo: ${result.cargadas}/${result.total} filas cargadas (${result.noNuestras} de locales que no son nuestros, ${result.descartadas} descartadas por datos incompletos).`,
+      `Listo: ${result.cargadas}/${result.total} filas cargadas (${result.noNuestras} de locales que no son nuestros, ${result.descartadas} descartadas por datos incompletos, ${result.rellenadas} con demanda de la semana anterior).`,
     );
     await logRun(supabase, { categoria: `${desde}_${hasta}`, startedAt, status: "success", filasCargadas: result.cargadas });
   } catch (err) {

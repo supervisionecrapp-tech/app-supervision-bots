@@ -72,6 +72,7 @@ export async function uploadCumplimientoFile({ filePath, supabaseUrl, supabaseSe
     });
   }
   const upsertRows = [...porClave.values()];
+  const rellenadas = await rellenarSemanasEnBlanco(supabase, upsertRows);
 
   const BATCH = 1000;
   for (let i = 0; i < upsertRows.length; i += BATCH) {
@@ -81,5 +82,64 @@ export async function uploadCumplimientoFile({ filePath, supabaseUrl, supabaseSe
     if (error) throw new Error(`cumplimiento_smu: ${error.message}`);
   }
 
-  return { total: raw.length, cargadas: upsertRows.length, descartadas, noNuestras };
+  return { total: raw.length, cargadas: upsertRows.length, descartadas, noNuestras, rellenadas };
+}
+
+const DIA_MS = 24 * 3600 * 1000;
+/** Menos filas que esto en una semana no alcanzan para decir que "el portal no
+ * publicó la demanda": podría ser un día suelto sin exigencia. */
+const MIN_FILAS_SEMANA = 10;
+
+const aMs = (iso) => Date.parse(`${iso}T00:00:00Z`);
+const aIso = (ms) => new Date(ms).toISOString().slice(0, 10);
+const lunesDe = (iso) => aIso(aMs(iso) - ((new Date(aMs(iso)).getUTCDay() + 6) % 7) * DIA_MS);
+
+/**
+ * El portal publica la demanda de la semana en curso en blanco (0 horas en TODOS
+ * los locales) y recién la completa unos días después; mientras tanto el
+ * cumplimiento queda en 0% y la pantalla de Presentismo SMU no muestra nada.
+ *
+ * Cuando TODA una semana del archivo viene sin demanda, se usa la del mismo día
+ * de la semana anterior (mismo local) y el % se calcula como lo hace el portal:
+ * horas / demanda, redondeado hacia arriba al entero y con tope 100. Si el
+ * portal ya publicó la demanda real, esa fila llega con valor y esto no actúa;
+ * y como el upsert pisa la fila, la cifra real reemplaza a la estimada sola.
+ *
+ * Una semana con algo de demanda NO se toca: un día sin exigencia ahí es real.
+ * Devuelve cuántas filas se rellenaron.
+ */
+export async function rellenarSemanasEnBlanco(supabase, filas) {
+  const porSemana = new Map();
+  for (const f of filas) {
+    const lunes = lunesDe(f.fecha);
+    const g = porSemana.get(lunes) ?? { n: 0, demanda: 0 };
+    g.n++;
+    g.demanda += f.demanda_horas;
+    porSemana.set(lunes, g);
+  }
+  const enBlanco = new Set([...porSemana].filter(([, g]) => g.n >= MIN_FILAS_SEMANA && g.demanda === 0).map(([l]) => l));
+  if (enBlanco.size === 0) return 0;
+
+  const objetivo = filas.filter((f) => enBlanco.has(lunesDe(f.fecha)));
+  const fechasPrevias = [...new Set(objetivo.map((f) => aIso(aMs(f.fecha) - 7 * DIA_MS)))];
+  const { data: previas, error } = await supabase
+    .from("cumplimiento_smu")
+    .select("sala_id, fecha, demanda_horas")
+    .in("fecha", fechasPrevias)
+    .limit(5000);
+  if (error) throw new Error(`cumplimiento_smu (semana anterior): ${error.message}`);
+  const demandaPrevia = new Map(previas.map((p) => [`${p.sala_id}|${p.fecha}`, Number(p.demanda_horas)]));
+
+  let rellenadas = 0;
+  for (const f of objetivo) {
+    const previa = demandaPrevia.get(`${f.sala_id}|${aIso(aMs(f.fecha) - 7 * DIA_MS)}`);
+    if (!(previa > 0)) continue;
+    f.demanda_horas = previa;
+    f.cumplimiento = Math.min(100, Math.ceil((f.horas_cumplidas / previa) * 100 - 1e-9));
+    rellenadas++;
+  }
+  console.log(
+    `Semana(s) ${[...enBlanco].join(", ")} sin demanda en el portal: ${rellenadas}/${objetivo.length} filas rellenadas con la semana anterior.`,
+  );
+  return rellenadas;
 }
