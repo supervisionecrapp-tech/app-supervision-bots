@@ -66,10 +66,12 @@ export async function scrapeCausasQuiebre({
     await page.waitForTimeout(800);
     await debugShot(page, downloadDir, "04-tabla");
 
-    // La tabla llega colapsada a nivel Sala (⊞ en cada fila): "Expandir al
-    // siguiente nivel" (el mismo drill-down-level-btn de Red) la baja a SKU
-    // para todas las salas a la vez. Sin esto el export no trae Sku-Item.
-    await frame.locator('[data-testid="drill-down-level-btn"]:visible').first().click();
+    // La tabla llega colapsada a nivel Sala (⊞ en cada fila). El botón ↓
+    // (drill-down-level-btn) NO sirve: baja de nivel y reemplaza la sala por
+    // el SKU (corrida 37837679385: el export traía Sku-Item sin Sala). Hace
+    // falta "Expandir todo un nivel" (⇊), que abre los SKU dentro de cada sala.
+    const expandir = await ubicarBotonExpandir(frame);
+    await expandir.click();
     await page.waitForTimeout(5000 * waitMultiplier);
     await debugShot(page, downloadDir, "04b-tabla-expandida");
     await tabla.hover();
@@ -127,6 +129,28 @@ async function bajarHastaTabla(tabla, page, downloadDir) {
 // y=104 alto=0), así que no sirve para hacer scroll ni hover. En cambio el
 // encabezado de columna sí es un elemento real con tamaño: "Última Causa
 // Quiebre" solo existe en esta tabla (el slicer se llama "Causa quiebre").
+async function ubicarBotonExpandir(frame) {
+  const candidatos = frame.locator('[data-testid*="level"]:visible, [data-testid*="expand"]:visible, [data-testid*="drill"]:visible');
+  const n = await candidatos.count();
+  const info = [];
+  for (let i = 0; i < n; i++) {
+    const b = candidatos.nth(i);
+    info.push({
+      i,
+      testid: await b.getAttribute("data-testid"),
+      label: (await b.getAttribute("aria-label")) || (await b.getAttribute("title")) || "",
+    });
+  }
+  console.log(`Botones de jerarquía visibles: ${JSON.stringify(info)}`);
+  // Por nombre: el testid o la etiqueta dicen "expand".
+  const porNombre = info.find((b) => /expand/i.test(`${b.testid} ${b.label}`));
+  if (porNombre) return candidatos.nth(porNombre.i);
+  // Por posición: en la cabecera el orden es ↑ ↓ ⇊ — el que sigue a drill-down.
+  const abajo = info.findIndex((b) => b.testid === "drill-down-level-btn");
+  if (abajo >= 0 && info[abajo + 1]) return candidatos.nth(abajo + 1);
+  throw new Error(`No se encontró el botón "Expandir todo un nivel". Botones: ${JSON.stringify(info)}`);
+}
+
 async function ubicarTabla(frame) {
   const encabezado = frame.getByText("Última Causa Quiebre").first();
   await encabezado.waitFor({ state: "attached", timeout: 15000 });
