@@ -58,15 +58,15 @@ export async function scrapeCausasQuiebre({
 
     await selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitMultiplier);
 
-    const tabla = await ubicarTabla(frame, downloadDir);
+    const tabla = await ubicarTabla(frame);
     await bajarHastaTabla(tabla, page, downloadDir);
     // Los botones de la tabla (incluido "…") aparecen recién cuando el mouse
     // pasa por encima del visual (ver red-sync: revelarHeaderTabla).
-    await tabla.hover({ position: { x: 200, y: 120 }, force: true });
+    await tabla.hover();
     await page.waitForTimeout(800);
     await debugShot(page, downloadDir, "04-tabla");
 
-    await tabla.locator('[data-testid="visual-more-options-btn"]').click();
+    await frame.locator('[data-testid="visual-more-options-btn"]:visible').first().click();
     await page.waitForTimeout(1500);
     await debugShot(page, downloadDir, "05a-menu-abierto");
 
@@ -86,6 +86,7 @@ export async function scrapeCausasQuiebre({
     await debugShot(page, downloadDir, "99-error");
     try {
       writeFileSync(`${downloadDir}/debug-99-error.html`, await page.content());
+      writeFileSync(`${downloadDir}/debug-99-error-iframe.html`, await page.frameLocator("iframe").locator("html").evaluate((e) => e.outerHTML));
     } catch {
       // sin HTML de diagnóstico, no pasa nada
     }
@@ -104,7 +105,7 @@ async function bajarHastaTabla(tabla, page, downloadDir) {
   for (let intento = 0; intento < 20; intento++) {
     const box = await tabla.boundingBox().catch(() => null);
     console.log(`Tabla: y=${box?.y} alto=${box?.height}`);
-    if (box && box.y > 80 && box.y < VIEWPORT.height - 250) return;
+    if (box && box.height > 0 && box.y > 140 && box.y < VIEWPORT.height - 120) return;
     await page.mouse.move(centro.x, centro.y);
     await page.mouse.wheel(0, 400);
     await page.waitForTimeout(500);
@@ -113,17 +114,14 @@ async function bajarHastaTabla(tabla, page, downloadDir) {
   console.warn("No se logró dejar la tabla a la vista tras bajar el reporte.");
 }
 
-async function ubicarTabla(frame, downloadDir) {
-  // Solo el contenedor MÁS INTERNO que tiene el encabezado: el selector
-  // simple `visual-container:has-text(...)` también calza con los
-  // contenedores que envuelven toda la página, y el hover/click caía sobre
-  // ellos (corrida 37836236628: no encontraba el botón "…").
-  const todos = frame.locator("visual-container");
-  const internos = todos.filter({ hasText: "Última Causa Quiebre" }).filter({ hasNot: frame.locator("visual-container") });
-  const n = await internos.count().catch(() => 0);
-  console.log(`Visuales con "Última Causa Quiebre" (los más internos): ${n}`);
-  if (n > 0) return internos.last();
-  throw new Error('No se encontró el visual de la tabla "Última Causa Quiebre".');
+// El <visual-container> de Power BI mide 0 de alto (corrida 37837032220:
+// y=104 alto=0), así que no sirve para hacer scroll ni hover. En cambio el
+// encabezado de columna sí es un elemento real con tamaño: "Última Causa
+// Quiebre" solo existe en esta tabla (el slicer se llama "Causa quiebre").
+async function ubicarTabla(frame) {
+  const encabezado = frame.getByText("Última Causa Quiebre").first();
+  await encabezado.waitFor({ state: "attached", timeout: 15000 });
+  return encabezado;
 }
 
 // Slicer "Año > Mes > Semana": mismo árbol que en Red (cada fila es un
