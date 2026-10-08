@@ -16,15 +16,6 @@ const REPORT_URL = "https://dichter-neira.datawalt.app/report/736";
 // reporte, NO verificadas en el runner: revisar las capturas de debug.
 const FALLBACK_WEEK_DROPDOWN = { x: 1750, y: 215 };
 
-// Contenedor del visual de la tabla: "Última Causa Quiebre" es un
-// encabezado que solo tiene esa tabla (el slicer "Causa quiebre" no lo
-// contiene completo).
-const TABLA_SELECTORS = [
-  'visual-container:has-text("Última Causa Quiebre")',
-  '.visualContainer:has-text("Última Causa Quiebre")',
-  '.visual-container-component:has-text("Última Causa Quiebre")',
-];
-
 export async function scrapeCausasQuiebre({
   anio,
   mes,
@@ -67,7 +58,7 @@ export async function scrapeCausasQuiebre({
 
     await selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitMultiplier);
 
-    const tabla = await ubicarTabla(frame);
+    const tabla = await ubicarTabla(frame, downloadDir);
     await bajarHastaTabla(tabla, page, downloadDir);
     // Los botones de la tabla (incluido "…") aparecen recién cuando el mouse
     // pasa por encima del visual (ver red-sync: revelarHeaderTabla).
@@ -112,6 +103,7 @@ async function bajarHastaTabla(tabla, page, downloadDir) {
   const centro = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
   for (let intento = 0; intento < 20; intento++) {
     const box = await tabla.boundingBox().catch(() => null);
+    console.log(`Tabla: y=${box?.y} alto=${box?.height}`);
     if (box && box.y > 80 && box.y < VIEWPORT.height - 250) return;
     await page.mouse.move(centro.x, centro.y);
     await page.mouse.wheel(0, 400);
@@ -121,11 +113,16 @@ async function bajarHastaTabla(tabla, page, downloadDir) {
   console.warn("No se logró dejar la tabla a la vista tras bajar el reporte.");
 }
 
-async function ubicarTabla(frame) {
-  for (const sel of TABLA_SELECTORS) {
-    const cont = frame.locator(sel).first();
-    if ((await cont.count().catch(() => 0)) > 0) return cont;
-  }
+async function ubicarTabla(frame, downloadDir) {
+  // Solo el contenedor MÁS INTERNO que tiene el encabezado: el selector
+  // simple `visual-container:has-text(...)` también calza con los
+  // contenedores que envuelven toda la página, y el hover/click caía sobre
+  // ellos (corrida 37836236628: no encontraba el botón "…").
+  const todos = frame.locator("visual-container");
+  const internos = todos.filter({ hasText: "Última Causa Quiebre" }).filter({ hasNot: frame.locator("visual-container") });
+  const n = await internos.count().catch(() => 0);
+  console.log(`Visuales con "Última Causa Quiebre" (los más internos): ${n}`);
+  if (n > 0) return internos.last();
   throw new Error('No se encontró el visual de la tabla "Última Causa Quiebre".');
 }
 

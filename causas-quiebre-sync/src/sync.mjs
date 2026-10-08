@@ -53,7 +53,7 @@ async function main() {
     console.log(`Sincronizando Causas de quiebre — año ${anio}, semana ${semana} (mes ${mes})`);
     const startedAt = new Date().toISOString();
     try {
-      const MAX_INTENTOS = 3;
+      const MAX_INTENTOS = 1; // sin reintentos: si falla, que falle y se vea
       let filePath;
       let ultimoError;
       for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
