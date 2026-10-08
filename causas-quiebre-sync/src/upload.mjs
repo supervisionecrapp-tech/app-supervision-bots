@@ -25,7 +25,11 @@ function isoDate(v) {
 
 // Portada de la lógica de red-sync/upload.mjs: service_role, sin RLS.
 export async function uploadCausasQuiebre({ filePath, anio, semana, supabaseUrl, supabaseServiceKey }) {
-  const wb = XLSX.readFile(filePath, { cellDates: true });
+  const wb = // Sin cellDates: "Días sin venta OOS" trae celdas con valor 0 y formato de
+  // fecha, que con cellDates salen como Date(1900) y Number() daba
+  // -2209161600000 (fuera de rango del integer). La fecha real llega como
+  // serial y la convierte isoDate().
+  XLSX.readFile(filePath, { cellDates: false });
   const ws = wb.Sheets["Export"];
   if (!ws) throw new Error(`El archivo no tiene una hoja "Export" (hojas: ${wb.SheetNames.join(", ")})`);
 
