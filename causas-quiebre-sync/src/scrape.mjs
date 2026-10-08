@@ -68,9 +68,11 @@ export async function scrapeCausasQuiebre({
     await selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitMultiplier);
 
     const tabla = await ubicarTabla(frame);
-    await tabla.scrollIntoViewIfNeeded().catch(() => {});
-    await tabla.hover();
-    await page.waitForTimeout(500);
+    await bajarHastaTabla(tabla, page, downloadDir);
+    // Los botones de la tabla (incluido "…") aparecen recién cuando el mouse
+    // pasa por encima del visual (ver red-sync: revelarHeaderTabla).
+    await tabla.hover({ position: { x: 200, y: 120 }, force: true });
+    await page.waitForTimeout(800);
     await debugShot(page, downloadDir, "04-tabla");
 
     await tabla.locator('[data-testid="visual-more-options-btn"]').click();
@@ -100,6 +102,23 @@ export async function scrapeCausasQuiebre({
   } finally {
     await browser.close();
   }
+}
+
+// La página "Causas del quiebre" es más alta que la pantalla y se desplaza
+// por dentro del iframe de Power BI: scrollIntoView de Playwright no llega
+// (el hover vencía a los 30 s con la tabla fuera de pantalla — corrida
+// 37834694993), así que se baja con la rueda hasta que la tabla asome.
+async function bajarHastaTabla(tabla, page, downloadDir) {
+  const centro = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
+  for (let intento = 0; intento < 20; intento++) {
+    const box = await tabla.boundingBox().catch(() => null);
+    if (box && box.y > 80 && box.y < VIEWPORT.height - 250) return;
+    await page.mouse.move(centro.x, centro.y);
+    await page.mouse.wheel(0, 400);
+    await page.waitForTimeout(500);
+  }
+  await debugShot(page, downloadDir, "03d-tabla-no-visible");
+  console.warn("No se logró dejar la tabla a la vista tras bajar el reporte.");
 }
 
 async function ubicarTabla(frame) {
