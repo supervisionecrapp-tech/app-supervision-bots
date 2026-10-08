@@ -1,0 +1,74 @@
+name: Causas de quiebre Sync
+
+on:
+  schedule:
+    # Mismos días y hora que red-sync (11:00 Chile = 15:00 UTC). Los martes
+    # además se recarga la semana anterior, que cierra el lunes.
+    - cron: "5 15 * * 1,2,3,5"
+  workflow_dispatch:
+    inputs:
+      semanas:
+        description: "Últimas N semanas (backfill). Vacío = solo la semana actual"
+        required: false
+      anio:
+        description: "Año (solo con mes y semana)"
+        required: false
+      mes:
+        description: "Mes del jueves de la semana (solo con año y semana)"
+        required: false
+      semana:
+        description: "Semana ISO (solo con año y mes)"
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: causas-quiebre-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+
+      - name: Detectar día de la semana
+        id: day
+        run: echo "dow=$(date +%u)" >> "$GITHUB_OUTPUT"
+
+      - name: "Sync — manual o semana actual"
+        env:
+          SEMANAS: ${{ github.event.inputs.semanas }}
+          ANIO: ${{ github.event.inputs.anio }}
+          MES: ${{ github.event.inputs.mes }}
+          SEMANA: ${{ github.event.inputs.semana }}
+          DOWNLOAD_DIR: ./downloads-actual
+          DATAWALT_USER: ${{ secrets.DATAWALT_USER }}
+          DATAWALT_PASS: ${{ secrets.DATAWALT_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync
+
+      - name: "Sync — semana anterior (solo martes)"
+        if: github.event_name == 'schedule' && steps.day.outputs.dow == '2'
+        env:
+          WEEKS_BACK: "1"
+          DOWNLOAD_DIR: ./downloads-anterior
+          DATAWALT_USER: ${{ secrets.DATAWALT_USER }}
+          DATAWALT_PASS: ${{ secrets.DATAWALT_PASS }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run sync
+
+      - name: Subir capturas de debug
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots-causas-quiebre
+          path: |
+            causas-quiebre-sync/downloads-*/**/debug-*.png
+            causas-quiebre-sync/downloads-*/**/debug-*.html
+          if-no-files-found: ignore
