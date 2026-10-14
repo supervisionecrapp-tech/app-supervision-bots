@@ -373,7 +373,10 @@ async function completarFocoIA(sb, visitas) {
   let ok = 0;
   await Promise.all(faltan.map(async (v) => {
     try {
-      const { data, error } = await sb.functions.invoke("analizar-visita", { body: { visita_id: v.id } });
+      const { data, error } = await sb.functions.invoke("analizar-visita", {
+        body: { visita_id: v.id },
+        headers: { "x-clave-servidor": process.env.SUPABASE_SERVICE_ROLE_KEY },
+      });
       if (error) throw error;
       const a = data?.analisis;
       if (a?.foco_urgente) { v.foco_urgente = a.foco_urgente; v.nivel = a.nivel_cumplimiento ?? v.nivel; ok++; }
