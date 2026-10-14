@@ -292,22 +292,26 @@ function seccionVisitas(visitas, fecha) {
   const titulo = `Visitas del día anterior · ${diaLargo(fecha)}`;
   if (!visitas.length) return `<h2>${titulo}</h2><p class="vacio">No se registraron visitas en la app ese día.</p>`;
   const salas = new Set(visitas.map((v) => v.sala)).size;
-  const puntajes = visitas.map((v) => v.puntaje).filter((x) => x != null);
-  const prom = puntajes.length ? Math.round(puntajes.reduce((a, b) => a + b, 0) / puntajes.length) : null;
   const porQuien = [...visitas.reduce((m, v) => m.set(v.quien, (m.get(v.quien) ?? 0) + 1), new Map())]
     .sort((a, b) => b[1] - a[1]).map(([q, n]) => `${esc(titulo_(q))} ${n}`);
   const criticas = visitas.filter((v) => v.nivel === "CRÍTICO" || v.nivel === "REGULAR").length;
   return `<h2>${titulo}</h2>
-    <div class="caja" style="margin-bottom:8px"><b>${visitas.length} visita${visitas.length === 1 ? "" : "s"}</b> en ${salas} sala${salas === 1 ? "" : "s"}${prom != null ? ` · puntaje promedio <b>${prom}</b>` : ""}${criticas ? ` · ${criticas} con nivel regular o crítico` : ""}. Por persona: ${porQuien.join(", ")}.</div>
+    <div class="caja" style="margin-bottom:8px"><b>${visitas.length} visita${visitas.length === 1 ? "" : "s"}</b> en ${salas} sala${salas === 1 ? "" : "s"}${criticas ? ` · ${criticas} con nivel regular o crítico` : ""}. Por persona: ${porQuien.join(", ")}.</div>
     <table>
-      <tr><th class="l">Sala</th><th class="l">Visitó</th><th>Tipo</th><th>Min.</th><th>Puntaje</th><th>Nivel</th><th class="l">Foco urgente (IA)</th></tr>
+      <tr><th class="l">Sala</th><th class="l">Visitó</th><th>Tipo</th><th>Duración</th><th>Nivel</th><th class="l">Foco urgente (IA)</th></tr>
       ${visitas.map((v) => `<tr><td class="l b">${esc(v.salaNombre)}</td><td class="l" style="white-space:nowrap">${esc(titulo_(v.quien))}</td><td>${esc(titulo_(v.tipo))}</td>
-        <td>${v.minutos ?? "–"}</td><td class="${v.puntaje != null && v.puntaje < 80 ? "bad" : ""}">${v.puntaje ?? "–"}</td>
+        <td style="white-space:nowrap">${duracion(v.minutos)}</td>
         <td>${v.nivel ? `<span class="pill ${esc(v.nivel)}">${esc(titulo_(v.nivel))}</span>` : "–"}</td>
         <td class="l">${esc(v.foco_urgente ?? "")}</td></tr>`).join("")}
     </table>`;
 }
 const titulo_ = titulo;
+/** Duración de la encuesta: "13 min", "1 h 08 min". */
+function duracion(min) {
+  if (min == null) return "–";
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min`;
+}
 
 function paginaCadem(sup, cadem, sem, focoIds) {
   const max = Math.max(...cadem.causas.map((c) => c.vp));
@@ -360,6 +364,26 @@ function resumirCadem(filas) {
  * Datos de todas las zonas de una vez (las funciones devuelven todas las
  * salas); `htmlZona` arma el informe de cada una.
  */
+/** Visitas sin foco urgente: se pide el análisis a analizar-visita una sola
+ * vez por visita (la función lo guarda en encuesta_visitas, así que también
+ * queda para la app y el portal). Si falla, la visita sale sin foco. */
+async function completarFocoIA(sb, visitas) {
+  const faltan = visitas.filter((v) => !v.foco_urgente);
+  if (!faltan.length) return;
+  let ok = 0;
+  await Promise.all(faltan.map(async (v) => {
+    try {
+      const { data, error } = await sb.functions.invoke("analizar-visita", { body: { visita_id: v.id } });
+      if (error) throw error;
+      const a = data?.analisis;
+      if (a?.foco_urgente) { v.foco_urgente = a.foco_urgente; v.nivel = a.nivel_cumplimiento ?? v.nivel; ok++; }
+    } catch (e) {
+      console.warn(`Sin foco IA para la visita ${v.id}: ${e.message ?? e}`);
+    }
+  }));
+  console.log(`Foco IA: ${ok} de ${faltan.length} visitas sin análisis se completaron.`);
+}
+
 export async function cargarDatos(sb, { incluirVisitas = true } = {}) {
   const hoy = hoySantiago();
   const lunes = masDias(lunesDe(hoy), -7); // última semana cerrada
@@ -390,6 +414,7 @@ export async function cargarDatos(sb, { incluirVisitas = true } = {}) {
     sb.from("zonas").select("id, nombre"),
   ]);
   if (metasRes.error) throw new Error(`metas_indicadores: ${metasRes.error.message}`);
+  await completarFocoIA(sb, visitas);
   if (zonasRes.error) throw new Error(`zonas: ${zonasRes.error.message}`);
   return {
     lunes, ayer, emitido: hoy, semanas, filasSem: [s0, s1, s2], causas, visitas, incluirVisitas,

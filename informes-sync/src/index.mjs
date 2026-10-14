@@ -38,9 +38,8 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
     const w = z.ind[2];
     const fila = (l, v, meta) => `<td style="padding:2px 10px 2px 0">${l}</td><td style="padding:2px 18px 2px 0;font-weight:600;color:${v == null ? "#6b7280" : v >= meta ? "#15803d" : "#b91c1c"}">${pct(v)}</td>`;
     const vis = z.visitas;
-    const prom = vis.filter((v) => v.puntaje != null);
     const visTxt = !incluirVisitas ? "" : vis.length
-      ? `<p style="margin:6px 0 0">Visitas del ${diaLargo(datos.ayer)}: <b>${vis.length}</b> en ${new Set(vis.map((v) => v.sala)).size} salas${prom.length ? `, puntaje promedio ${Math.round(prom.reduce((a, v) => a + v.puntaje, 0) / prom.length)}` : ""}.</p>`
+      ? `<p style="margin:6px 0 0">Visitas del ${diaLargo(datos.ayer)}: <b>${vis.length}</b> en ${new Set(vis.map((v) => v.sala)).size} salas.</p>`
       : `<p style="margin:6px 0 0;color:#6b7280">Sin visitas registradas el ${diaLargo(datos.ayer)}.</p>`;
     return `<div style="margin:14px 0"><b style="font-size:15px">${esc(z.zona)}</b> · ${z.salasZona.length} salas · ${z.foco.length} salas foco
       <table style="border-collapse:collapse;margin-top:4px;font-size:13px">
