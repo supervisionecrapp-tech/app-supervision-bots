@@ -1,55 +1,121 @@
-// Punto de entrada: `npm run start -- <informe> [destinatarios]`.
-// Con SOLO_ARCHIVO=<ruta> el informe se guarda en disco y no se envía
-// (para revisarlo antes de mandarlo).
-import { writeFile } from "node:fs/promises";
+// Punto de entrada.
+//   npm run start -- envio <envio_id> [si|no]   un envío configurado en el portal
+//                                                (si = disparado a mano)
+//   npm run start -- salas_foco <zona|todas> <destinatarios>   prueba suelta
+//   npm run start -- prueba <destinatarios>
+// Con SOLO_ARCHIVO=<carpeta> los PDF se guardan ahí y no se envía nada.
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { createClient } from "@supabase/supabase-js";
 import { enviarCorreo, REMITENTE } from "./correo.mjs";
-import { generarInformeIndicadores, INDICADORES, VP_REFERENCIA, pct, estado, fechaCorta, masDias } from "./indicadores.mjs";
+import { cargarDatos, armarZona, htmlZona, aPdf, pct, clp, esc, diaLargo } from "./salas_foco.mjs";
 
-const [informe = "prueba", para = REMITENTE] = process.argv.slice(2);
+const [modo = "prueba", arg1, arg2] = process.argv.slice(2);
 
-const informes = {
+function supabase() {
+  const url = process.env.SUPABASE_URL || "https://lbwwnrsbgaxjulpfbwdz.supabase.co";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+/** Arma los PDF de las zonas pedidas (null = todas) y el cuerpo del correo. */
+async function generarSalasFoco(sb, zonaId, incluirVisitas) {
+  const datos = await cargarDatos(sb, { incluirVisitas });
+  const zonas = zonaId ? datos.zonas.filter((z) => z.id === zonaId) : [...datos.zonas].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+  if (!zonas.length) throw new Error(`Zona ${zonaId} no encontrada`);
+  const armadas = zonas.map((z) => armarZona(datos, z.id)).filter((z) => z.salasZona.length);
+  const pdfs = await aPdf(armadas.map((z) => htmlZona(datos, z)));
+  const sem = datos.semanas[2].semana;
+  const fecha = datos.emitido.toISOString().slice(0, 10);
+
+  const adjuntos = armadas.map((z, i) => ({
+    filename: `informe_${z.zona.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_")}_salas_foco_${fecha}.pdf`,
+    content: pdfs[i], contentType: "application/pdf",
+  }));
+
+  const resumenZona = (z) => {
+    const w = z.ind[2];
+    const fila = (l, v, meta) => `<td style="padding:2px 10px 2px 0">${l}</td><td style="padding:2px 18px 2px 0;font-weight:600;color:${v == null ? "#6b7280" : v >= meta ? "#15803d" : "#b91c1c"}">${pct(v)}</td>`;
+    const vis = z.visitas;
+    const prom = vis.filter((v) => v.puntaje != null);
+    const visTxt = !incluirVisitas ? "" : vis.length
+      ? `<p style="margin:6px 0 0">Visitas del ${diaLargo(datos.ayer)}: <b>${vis.length}</b> en ${new Set(vis.map((v) => v.sala)).size} salas${prom.length ? `, puntaje promedio ${Math.round(prom.reduce((a, v) => a + v.puntaje, 0) / prom.length)}` : ""}.</p>`
+      : `<p style="margin:6px 0 0;color:#6b7280">Sin visitas registradas el ${diaLargo(datos.ayer)}.</p>`;
+    return `<div style="margin:14px 0"><b style="font-size:15px">${esc(z.zona)}</b> · ${z.salasZona.length} salas · ${z.foco.length} salas foco
+      <table style="border-collapse:collapse;margin-top:4px;font-size:13px">
+        <tr>${fila("NARTD", w.nartd, z.metas.red_nartd)}${fila("ABI", w.abi, z.metas.red_abi)}${fila("VSR", w.vsr, z.metas.red_vsr)}</tr>
+        <tr>${fila("Pres. SMU", w.SMU, z.metas.presentismo)}${fila("Pres. WM", w.WM, z.metas.presentismo)}<td style="padding:2px 10px 2px 0">Vta. perdida Cadem</td><td style="font-weight:600">${clp(z.cadem.total)}</td></tr>
+      </table>${visTxt}</div>`;
+  };
+  const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
+    <p>Adjunto el informe de salas foco por supervisor${armadas.length > 1 ? ", uno por zona" : ""}. Indicadores de la semana ${sem}${incluirVisitas ? " y visitas del día anterior" : ""}.</p>
+    ${armadas.map(resumenZona).join("")}
+    <p style="color:#6b7280;font-size:12px">Rojo = fuera de meta. El detalle por supervisor, las salas foco y la venta perdida por SKU están en el PDF.</p></div>`;
+  const asunto = `${armadas.length === 1 ? armadas[0].zona : "Zonas"} · Salas foco por supervisor · Semana ${sem}`;
+  return { adjuntos, html, asunto };
+}
+
+async function guardarOEnviar({ para, asunto, html, adjuntos }) {
+  if (process.env.SOLO_ARCHIVO) {
+    await mkdir(process.env.SOLO_ARCHIVO, { recursive: true });
+    for (const a of adjuntos) await writeFile(path.join(process.env.SOLO_ARCHIVO, a.filename), a.content);
+    await writeFile(path.join(process.env.SOLO_ARCHIVO, "correo.html"), html);
+    console.log(`Guardado en ${process.env.SOLO_ARCHIVO}: ${adjuntos.map((a) => a.filename).join(", ")}`);
+    return;
+  }
+  await enviarCorreo({ para, asunto, html, adjuntos });
+}
+
+const modos = {
   async prueba() {
     const ahora = new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" });
     await enviarCorreo({
-      para,
+      para: arg1 || REMITENTE,
       asunto: "Prueba de envío de informes",
-      html: `<p>Este es un correo de prueba enviado desde GitHub Actions.</p>
-             <p>Si te llegó, el envío de informes por correo está funcionando.</p>
-             <p style="color:#888">Enviado el ${ahora}</p>`,
+      html: `<p>Este es un correo de prueba enviado desde GitHub Actions.</p><p style="color:#888">Enviado el ${ahora}</p>`,
     });
   },
 
-  async indicadores() {
-    const r = await generarInformeIndicadores();
-    const nombre = `indicadores_semana_${r.semana}_${r.anio}.pdf`;
-    if (process.env.SOLO_ARCHIVO) {
-      await writeFile(process.env.SOLO_ARCHIVO, r.pdf);
-      await writeFile(process.env.SOLO_ARCHIVO.replace(/\.pdf$/i, ".html"), r.html);
-      console.log(`Guardado en ${process.env.SOLO_ARCHIVO}`);
-      return;
+  async salas_foco() {
+    const sb = supabase();
+    let zonaId = null;
+    if (arg1 && arg1.toLowerCase() !== "todas") {
+      const { data } = await sb.from("zonas").select("id, nombre");
+      zonaId = data.find((z) => z.nombre.toLowerCase() === arg1.toLowerCase())?.id;
+      if (!zonaId) throw new Error(`Zona desconocida: ${arg1}`);
     }
-    const color = { ok: "#15803d", bad: "#b91c1c" };
-    const resumen = INDICADORES.map((ind) => {
-      const v = r.total[ind.key];
-      return `<tr><td style="padding:3px 12px 3px 0">${ind.label}</td>
-        <td style="padding:3px 0;text-align:right;font-weight:600;color:${color[estado(ind, v, r.metas)] ?? "#1f2937"}">${pct(v, ind.inverso ? 2 : 1)}</td></tr>`;
-    }).join("");
-    await enviarCorreo({
-      para,
-      asunto: `Indicadores generales · Semana ${r.semana} (${fechaCorta(r.lunes)} – ${fechaCorta(masDias(r.lunes, 6))})`,
-      html: `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
-        <p>Adjunto el informe general de indicadores de la semana ${r.semana}, por zona y por supervisor.</p>
-        <p style="margin-bottom:4px"><b>Total ${r.total.salas} salas:</b></p>
-        <table style="border-collapse:collapse">${resumen}</table>
-        <p style="color:#6b7280;font-size:12px">Rojo = fuera de meta. Venta perdida contra referencia de ${pct(VP_REFERENCIA, 0)}.</p>
-      </div>`,
-      adjuntos: [{ filename: nombre, content: r.pdf, contentType: "application/pdf" }],
-    });
+    const r = await generarSalasFoco(sb, zonaId, true);
+    await guardarOEnviar({ para: arg2 || REMITENTE, ...r });
+  },
+
+  async envio() {
+    const sb = supabase();
+    const manual = arg2 === "si";
+    const { data: envio, error } = await sb.from("informes_envios").select("*").eq("id", arg1).maybeSingle();
+    if (error) throw new Error(`informes_envios: ${error.message}`);
+    if (!envio) throw new Error(`Envío ${arg1} no existe`);
+    if (!envio.activo && !manual) { console.log(`"${envio.nombre}" está desactivado; no se envía.`); return; }
+    const { data: dest, error: e2 } = await sb.from("informes_destinatarios").select("email").eq("envio_id", envio.id).eq("activo", true);
+    if (e2) throw new Error(`informes_destinatarios: ${e2.message}`);
+    const para = dest.map((d) => d.email);
+    if (!para.length) { console.log(`"${envio.nombre}" no tiene destinatarios activos.`); return; }
+
+    const log = (ok, detalle) => sb.from("informes_envios_log").insert({ envio_id: envio.id, manual, destinatarios: para, ok, detalle });
+    try {
+      const r = await generarSalasFoco(sb, envio.zona_id, envio.incluir_visitas);
+      await guardarOEnviar({ para: para.join(", "), ...r });
+      if (!process.env.SOLO_ARCHIVO) await log(true, r.asunto);
+      console.log(`"${envio.nombre}" enviado a ${para.length} destinatario(s).`);
+    } catch (e) {
+      if (!process.env.SOLO_ARCHIVO) await log(false, String(e.message ?? e).slice(0, 500));
+      throw e;
+    }
   },
 };
 
-if (!informes[informe]) {
-  console.error(`Informe desconocido: ${informe}`);
+if (!modos[modo]) {
+  console.error(`Modo desconocido: ${modo}`);
   process.exit(1);
 }
-await informes[informe]();
+await modos[modo]();

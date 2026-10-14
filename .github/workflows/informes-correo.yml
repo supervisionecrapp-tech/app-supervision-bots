@@ -1,19 +1,29 @@
 name: Informes por correo
 
+# Lo dispara Supabase: informes_programados() cada hora para los envíos que
+# tocan, e informes_enviar_ahora() desde el botón del portal. A mano sirve
+# para pruebas: sin envio_id manda el informe de la zona a los destinatarios
+# que se indiquen.
 on:
   workflow_dispatch:
     inputs:
-      informe:
-        description: "Informe a enviar (prueba, indicadores)"
-        default: "indicadores"
+      envio_id:
+        description: "Envío configurado en el portal (vacío = prueba suelta)"
+        default: ""
+      manual:
+        description: "si = disparado a mano (manda aunque esté desactivado)"
+        default: "si"
+      zona:
+        description: "Prueba suelta: zona (talca, viña, arica, iquique o todas)"
+        default: "todas"
       para:
-        description: "Destinatarios (separados por coma)"
+        description: "Prueba suelta: destinatarios (separados por coma)"
         default: "supervisionecrapp@gmail.com"
 
 jobs:
   enviar:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: informes-sync
@@ -32,6 +42,13 @@ jobs:
         env:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          INFORME: ${{ inputs.informe }}
+          ENVIO_ID: ${{ inputs.envio_id }}
+          MANUAL: ${{ inputs.manual }}
+          ZONA: ${{ inputs.zona }}
           PARA: ${{ inputs.para }}
-        run: npm run start -- "$INFORME" "$PARA"
+        run: |
+          if [ -n "$ENVIO_ID" ]; then
+            npm run start -- envio "$ENVIO_ID" "$MANUAL"
+          else
+            npm run start -- salas_foco "$ZONA" "$PARA"
+          fi
