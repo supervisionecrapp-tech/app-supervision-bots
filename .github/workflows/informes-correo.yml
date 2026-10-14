@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       informe:
-        description: "Informe a enviar"
-        default: "prueba"
+        description: "Informe a enviar (prueba, indicadores)"
+        default: "indicadores"
       para:
         description: "Destinatarios (separados por coma)"
         default: "supervisionecrapp@gmail.com"
@@ -13,7 +13,7 @@ on:
 jobs:
   enviar:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: informes-sync
@@ -26,9 +26,12 @@ jobs:
 
       - run: npm install
 
+      - run: npx playwright install --with-deps chromium
+
       - name: Enviar
         env:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           INFORME: ${{ inputs.informe }}
           PARA: ${{ inputs.para }}
         run: npm run start -- "$INFORME" "$PARA"
