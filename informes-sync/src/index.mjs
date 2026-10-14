@@ -3,11 +3,13 @@
 //                                                (si = disparado a mano)
 //   npm run start -- salas_foco <zona|todas> <destinatarios>   prueba suelta
 //   npm run start -- prueba <destinatarios>
+//   npm run start -- alarmas [dias]   alarmas B2B del correo → catálogo de promociones
 // Con SOLO_ARCHIVO=<carpeta> los PDF se guardan ahí y no se envía nada.
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { enviarCorreo, REMITENTE } from "./correo.mjs";
+import { cargarAlarmas } from "./alarmas.mjs";
 import { cargarDatos, armarZona, htmlZona, aPdf, pct, clp, esc, diaLargo } from "./salas_foco.mjs";
 
 const [modo = "prueba", arg1, arg2] = process.argv.slice(2);
@@ -86,6 +88,11 @@ const modos = {
     }
     const r = await generarSalasFoco(sb, zonaId, true);
     await guardarOEnviar({ para: arg2 || REMITENTE, ...r });
+  },
+
+  async alarmas() {
+    const r = await cargarAlarmas(supabase(), { dias: Number(arg1) || 14 });
+    console.log(`Alarmas: ${r.revisadas} en el correo, ${r.nuevas} nuevas cargadas`, JSON.stringify(r.estados));
   },
 
   async envio() {

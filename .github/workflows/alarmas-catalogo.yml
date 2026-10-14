@@ -1,0 +1,36 @@
+name: Alarmas B2B → catálogo
+
+# Lee las alarmas B2B de Dichter & Neira que llegan a la cuenta de informes y
+# carga las promociones de "DETALLE CATALOGOS" en catalogo_promociones (ver
+# informes-sync/src/alarmas.mjs). Lo dispara pg_cron (alarmas-catalogo) y se
+# puede correr a mano. Solo lee el correo.
+on:
+  workflow_dispatch:
+    inputs:
+      dias:
+        description: "Cuántos días hacia atrás revisar"
+        default: "14"
+
+concurrency:
+  group: alarmas-catalogo
+  cancel-in-progress: false
+
+jobs:
+  cargar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: informes-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Cargar alarmas
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DIAS: ${{ inputs.dias || '14' }}
+        run: npm run start -- alarmas "$DIAS"
