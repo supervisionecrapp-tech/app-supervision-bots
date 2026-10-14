@@ -3,7 +3,7 @@ name: Alarmas B2B → catálogo
 # Lee las alarmas B2B de Dichter & Neira que llegan a la cuenta de informes y
 # carga las promociones de "DETALLE CATALOGOS" en catalogo_promociones (ver
 # informes-sync/src/alarmas.mjs). Lo dispara pg_cron (alarmas-catalogo) y se
-# puede correr a mano. Solo lee el correo.
+# puede correr a mano. Lo ya registrado se manda a la papelera de Gmail.
 on:
   workflow_dispatch:
     inputs:

@@ -5,9 +5,9 @@
 // LIDER MALL ARICA" y un PDF ALARMA_MEDICION_<visita>.pdf. De ese PDF se toma
 // la sección "DETALLE CATALOGOS" (las promociones del catálogo vigente y si
 // cada una se encontró en la sala) y se carga con catalogo_cargar_alarma(),
-// que la suma al catálogo de la zona y deja la presencia de esa sala. Solo
-// lee el correo: no lo marca ni lo mueve; lo ya procesado se reconoce por su
-// Message-ID en alarmas_b2b.
+// que la suma al catálogo de la zona y deja la presencia de esa sala. Lo ya
+// procesado se reconoce por su Message-ID en alarmas_b2b y se manda a la
+// papelera de Gmail (se borra sola a los 30 días).
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -186,7 +186,7 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
   const imap = new ImapFlow({ host: "imap.gmail.com", port: 993, secure: true, auth: { user: REMITENTE, pass }, logger: false });
   await imap.connect();
   const resumen = { revisadas: 0, nuevas: 0, estados: {} };
-  const lock = await imap.getMailboxLock("INBOX", { readOnly: true });
+  const lock = await imap.getMailboxLock("INBOX");
   try {
     const desde = new Date(Date.now() - dias * 86400000);
     const uids = await imap.search({ subject: "ALARMA B2B", since: desde }, { uid: true });
@@ -204,19 +204,25 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
     }
     const pendientes = uids.filter((u) => ids.get(u) && !hechos.has(ids.get(u)));
     resumen.revisadas = uids.length;
-    if (!pendientes.length) return resumen;
+    // Lo que ya está registrado se va a la papelera (Gmail lo borra a los 30
+    // días): el detalle quedó en alarmas_b2b y no hace falta el correo ni
+    // para asignar sala a mano. Un PDF que no se pudo leer se deja en la
+    // bandeja para revisarlo.
+    const aPapelera = uids.filter((u) => hechos.has(ids.get(u)));
 
-    for await (const msg of imap.fetch(pendientes, { source: true }, { uid: true })) {
+    for await (const msg of pendientes.length ? imap.fetch(pendientes, { source: true }, { uid: true }) : []) {
       const correo = await simpleParser(msg.source);
       const asunto = leerAsunto(correo.subject);
       const pdf = correo.attachments.find((a) => a.contentType === "application/pdf" && /ALARMA/i.test(a.filename ?? ""));
       let promociones = [], datos = { medidoAt: null, folio: null, visita: null };
+      let legible = !!(asunto && pdf);
       if (asunto && pdf) {
         try {
           const leido = await leerPdf(pdf.content);
           promociones = leerCatalogo(leido, asunto.categoria);
           datos = leerDatosPdf(leido.lineas);
         } catch (e) {
+          legible = false;
           console.warn(`PDF ilegible en "${correo.subject}": ${e.message}`);
         }
       }
@@ -229,11 +235,19 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
         p_detalle: promociones,
       });
       if (error) throw new Error(`catalogo_cargar_alarma: ${error.message}`);
+      if (legible) aPapelera.push(msg.uid);
       resumen.nuevas++;
       resumen.estados[estado] = (resumen.estados[estado] ?? 0) + 1;
       const si = promociones.filter((x) => x.encontrado === true).length;
       const no = promociones.filter((x) => x.encontrado === false).length;
       console.log(`${estado.padEnd(13)} ${String(promociones.length).padStart(3)} promos (encontradas ${si}, no ${no}) · ${correo.subject}`);
+    }
+
+    if (aPapelera.length) {
+      const papelera = (await imap.list()).find((b) => b.specialUse === "\\Trash");
+      if (!papelera) throw new Error("No se encontró la papelera de Gmail");
+      await imap.messageMove(aPapelera, papelera.path, { uid: true });
+      resumen.aPapelera = aPapelera.length;
     }
     return resumen;
   } finally {
