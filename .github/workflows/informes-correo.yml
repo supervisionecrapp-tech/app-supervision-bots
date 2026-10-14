@@ -1,0 +1,34 @@
+name: Informes por correo
+
+on:
+  workflow_dispatch:
+    inputs:
+      informe:
+        description: "Informe a enviar"
+        default: "prueba"
+      para:
+        description: "Destinatarios (separados por coma)"
+        default: "supervisionecrapp@gmail.com"
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    defaults:
+      run:
+        working-directory: informes-sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      - name: Enviar
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          INFORME: ${{ inputs.informe }}
+          PARA: ${{ inputs.para }}
+        run: npm run start -- "$INFORME" "$PARA"
