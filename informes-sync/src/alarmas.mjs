@@ -3,13 +3,14 @@
 // Las alarmas llegan (reenviadas) a supervisionecrapp@gmail.com: un correo por
 // sala y categoría, con asunto "[RED 56%] ALARMA B2B EMBONOR | 635 | WALMART |
 // LIDER MALL ARICA" y un PDF ALARMA_MEDICION_<visita>.pdf. De ese PDF se toma
-// la sección "DETALLE CATALOGOS" (las promociones del catálogo vigente) y se
-// carga con catalogo_cargar_alarma(), que la suma al catálogo de la zona y el
-// holding de la sala. Solo lee el correo: no lo marca ni lo mueve; lo ya
-// procesado se reconoce por su Message-ID en alarmas_b2b.
+// la sección "DETALLE CATALOGOS" (las promociones del catálogo vigente y si
+// cada una se encontró en la sala) y se carga con catalogo_cargar_alarma(),
+// que la suma al catálogo de la zona y deja la presencia de esa sala. Solo
+// lee el correo: no lo marca ni lo mueve; lo ya procesado se reconoce por su
+// Message-ID en alarmas_b2b.
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { REMITENTE } from "./correo.mjs";
 
 const PROVEEDOR_CATEGORIA = { EMBONOR: "NARTD", "AB INBEV": "ABI", "VIÑA SANTA RITA": "VSR", "VINA SANTA RITA": "VSR" };
@@ -32,18 +33,65 @@ export function leerAsunto(asunto) {
   };
 }
 
-/** Líneas de texto del PDF en orden de lectura: { pagina, x, y, texto }. */
-async function lineasPdf(buffer) {
-  const doc = await getDocument({ data: new Uint8Array(buffer), verbosity: 0 }).promise;
-  const out = [];
+/** Color de una imagen ya decodificada: "verde" (✔), "rojo" (✘) o null. */
+function colorImagen(img) {
+  const d = img?.data;
+  if (!d) return null;
+  const ch = img.kind === 3 ? 4 : img.kind === 2 ? 3 : 1;
+  if (ch === 1) return null;
+  let r = 0, g = 0, n = 0;
+  for (let k = 0; k + 2 < d.length; k += ch) {
+    if (ch === 4 && d[k + 3] < 128) continue;
+    if (d[k] > 230 && d[k + 1] > 230 && d[k + 2] > 230) continue; // fondo blanco
+    r += d[k]; g += d[k + 1]; n++;
+  }
+  if (!n) return null;
+  r /= n; g /= n;
+  return g > r * 2 ? "verde" : r > g * 2 ? "rojo" : null;
+}
+
+/**
+ * Texto e imágenes del PDF: líneas { pagina, x, y, texto } en orden de
+ * lectura, y marcas { pagina, x, yCentro, color } (el ✔ verde y el ✘ rojo
+ * son imágenes, no texto).
+ */
+export async function leerPdf(buffer) {
+  // Sin OffscreenCanvas, pdfjs entrega los píxeles de cada imagen en Node.
+  const doc = await getDocument({ data: new Uint8Array(buffer), verbosity: 0, isOffscreenCanvasSupported: false }).promise;
+  const lineas = [], marcas = [];
+  const mult = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3],
+    a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
   for (let p = 1; p <= doc.numPages; p++) {
-    const tc = await (await doc.getPage(p)).getTextContent();
-    for (const it of tc.items) {
+    const page = await doc.getPage(p);
+    for (const it of (await page.getTextContent()).items) {
       const texto = it.str.replace(/\s+/g, " ").trim();
-      if (texto) out.push({ pagina: p, x: it.transform[4], y: it.transform[5], texto });
+      if (texto) lineas.push({ pagina: p, x: it.transform[4], y: it.transform[5], texto });
+    }
+    const ops = await page.getOperatorList();
+    const pila = [[1, 0, 0, 1, 0, 0]];
+    const colores = new Map();
+    for (let i = 0; i < ops.fnArray.length; i++) {
+      const fn = ops.fnArray[i], args = ops.argsArray[i];
+      if (fn === OPS.save) pila.push(pila[pila.length - 1]);
+      else if (fn === OPS.restore) pila.pop();
+      else if (fn === OPS.transform) pila[pila.length - 1] = mult(pila[pila.length - 1], args);
+      else if (fn === OPS.paintImageXObject) {
+        const m = pila[pila.length - 1];
+        if (!colores.has(args[0])) {
+          // Las imágenes que se repiten en varias páginas ("g_…") van en commonObjs.
+          const almacen = args[0].startsWith("g_") ? page.commonObjs : page.objs;
+          const img = await Promise.race([
+            new Promise((r) => almacen.get(args[0], r)),
+            new Promise((r) => setTimeout(() => r(null), 5000)),
+          ]);
+          colores.set(args[0], colorImagen(img));
+        }
+        const color = colores.get(args[0]);
+        if (color) marcas.push({ pagina: p, x: m[4], yCentro: m[5] + m[3] / 2, color });
+      }
     }
   }
-  return out;
+  return { lineas, marcas };
 }
 
 /**
@@ -52,25 +100,71 @@ async function lineasPdf(buffer) {
  * ~17 pt, así que una distancia corta es continuación de la fila anterior. En
  * VSR los nombres terminan siempre en "O VARIEDADES", lo que además permite
  * unir un nombre que se parte entre dos páginas.
+ *
+ * Presencia: en la columna derecha va un ✔ verde o un ✘ rojo (imágenes)
+ * centrado en la fila; sin marca, `encontrado` queda null.
+ * Devuelve [{ promocion, encontrado }].
  */
-export function leerCatalogo(lineas, categoria) {
+export function leerCatalogo({ lineas, marcas }, categoria) {
   const ini = lineas.findIndex((l) => /DETALLE CATALOGOS/i.test(l.texto));
   if (ini < 0) return [];
-  const items = [];
+  const items = []; // { promocion, pagina, y, yFin }
   let prev = null;
+  let fin = null; // dónde termina la sección, para no tomar marcas de la siguiente
   for (const l of lineas.slice(ini + 1)) {
-    if (/^\*?\s*Indicadores usados|^Si el local|^PRIMERA POSICI|No se han encontrado promociones|^reasignarla/i.test(l.texto)) break;
+    if (/^\*?\s*Indicadores usados|^Si el local|^PRIMERA POSICI|No se han encontrado promociones|^reasignarla/i.test(l.texto)) {
+      fin = l;
+      break;
+    }
     if (/^\*?\s*PRESENCIA$|^PROMOCION$|^CARTEL$/i.test(l.texto)) continue;
     if (l.x > 300) continue; // columna de presencia
+    const ultimo = items[items.length - 1];
     const continua = prev && (
       (prev.pagina === l.pagina && prev.y - l.y < 25) ||
-      (categoria === "VSR" && !/VARIEDADES$/i.test(items[items.length - 1]))
+      (categoria === "VSR" && !/VARIEDADES$/i.test(ultimo.promocion))
     );
-    if (continua) items[items.length - 1] += ` ${l.texto}`;
-    else items.push(l.texto);
+    if (continua) {
+      ultimo.promocion += ` ${l.texto}`;
+      if (ultimo.pagina === l.pagina) ultimo.yFin = l.y;
+      else ultimo.siguiente = { pagina: l.pagina, y: l.y }; // la fila sigue en la otra página
+    } else items.push({ promocion: l.texto, pagina: l.pagina, y: l.y, yFin: l.y });
     prev = l;
   }
-  return [...new Set(items.map((s) => s.replace(/\s+/g, " ").trim()).filter(Boolean))];
+  // Marcas de la columna de presencia dentro de la sección, en orden de lectura.
+  const cab = lineas[ini];
+  const antes = (a, b) => a.pagina < b.pagina || (a.pagina === b.pagina && a.y > b.y);
+  const seccion = marcas
+    .filter((m) => m.x > 400)
+    .map((m) => ({ ...m, y: m.yCentro }))
+    .filter((m) => antes(cab, m) && (!fin || antes(m, fin)))
+    .sort((a, b) => a.pagina - b.pagina || b.y - a.y);
+  const cerca = (pagina, centro) => seccion
+    .filter((m) => m.pagina === pagina && Math.abs(m.y - centro) < 18)
+    .sort((a, b) => Math.abs(a.y - centro) - Math.abs(b.y - centro))[0];
+
+  // 1) La marca centrada en la fila (o en su continuación si se parte entre páginas).
+  const asignadas = items.map((it) =>
+    cerca(it.pagina, (it.y + it.yFin) / 2 + 4) ?? (it.siguiente ? cerca(it.siguiente.pagina, it.siguiente.y + 4) : undefined));
+  // 2) Una fila que cae justo en un salto de página puede tener su marca al pie
+  //    de la página anterior: si entre la marca de la fila previa y la de la
+  //    siguiente queda exactamente una marca libre, es la suya.
+  const usadas = new Set(asignadas.filter(Boolean));
+  asignadas.forEach((m, i) => {
+    if (m) return;
+    const desde = i > 0 && asignadas[i - 1] ? seccion.indexOf(asignadas[i - 1]) : -1;
+    const sig = asignadas.slice(i + 1).find(Boolean);
+    const hasta = sig ? seccion.indexOf(sig) : seccion.length;
+    const libres = seccion.slice(desde + 1, hasta).filter((x) => !usadas.has(x));
+    if (libres.length === 1) { asignadas[i] = libres[0]; usadas.add(libres[0]); }
+  });
+
+  const vistos = new Set();
+  return items
+    .map((it, i) => ({
+      promocion: it.promocion.replace(/\s+/g, " ").trim(),
+      encontrado: asignadas[i] ? asignadas[i].color === "verde" : null,
+    }))
+    .filter((x) => x.promocion && !vistos.has(x.promocion) && vistos.add(x.promocion));
 }
 
 function leerDatosPdf(lineas) {
@@ -119,9 +213,9 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
       let promociones = [], datos = { medidoAt: null, folio: null, visita: null };
       if (asunto && pdf) {
         try {
-          const lineas = await lineasPdf(pdf.content);
-          promociones = leerCatalogo(lineas, asunto.categoria);
-          datos = leerDatosPdf(lineas);
+          const leido = await leerPdf(pdf.content);
+          promociones = leerCatalogo(leido, asunto.categoria);
+          datos = leerDatosPdf(leido.lineas);
         } catch (e) {
           console.warn(`PDF ilegible en "${correo.subject}": ${e.message}`);
         }
@@ -130,14 +224,16 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
         p_message_id: ids.get(msg.uid), p_asunto: correo.subject ?? "",
         p_visita: datos.visita, p_folio: datos.folio,
         p_categoria: asunto?.categoria ?? null, p_holding: asunto?.holding ?? null, p_local: asunto?.local ?? null,
-        p_nota_red: asunto?.notaRed ?? null,
+        p_sala_asunto: asunto?.sala ?? null, p_nota_red: asunto?.notaRed ?? null,
         p_medido_at: datos.medidoAt ?? correo.date?.toISOString() ?? new Date().toISOString(),
-        p_promociones: promociones,
+        p_detalle: promociones,
       });
       if (error) throw new Error(`catalogo_cargar_alarma: ${error.message}`);
       resumen.nuevas++;
       resumen.estados[estado] = (resumen.estados[estado] ?? 0) + 1;
-      console.log(`${estado.padEnd(13)} ${promociones.length.toString().padStart(3)} promos · ${correo.subject}`);
+      const si = promociones.filter((x) => x.encontrado === true).length;
+      const no = promociones.filter((x) => x.encontrado === false).length;
+      console.log(`${estado.padEnd(13)} ${String(promociones.length).padStart(3)} promos (encontradas ${si}, no ${no}) · ${correo.subject}`);
     }
     return resumen;
   } finally {
