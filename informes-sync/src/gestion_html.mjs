@@ -28,6 +28,12 @@ const CSS_GESTION = `
   .secuencia li { counter-increment: paso; margin: 3px 0; break-inside: avoid; }
   .secuencia li::before { content: counter(paso) ". "; font-weight: 700; color: #b91c1c; }
   svg.barras { display: block; margin: 4px 0; }
+  table.ranking tr.espacio td { border: none; padding: 0; height: 10px; }
+  table.ranking tr.grupo td { background: #1f2937; color: #fff; font-weight: 700; font-size: 10.5px; padding: 5px 8px; text-align: left; border: none; }
+  table.ranking tr.grupo td .x { color: #d1d5db; font-weight: 400; }
+  table.ranking tr.sala-ini td { border-top: 1.5px solid #9ca3af; }
+  table.ranking tr.grupo + tr.sala-ini td { border-top: none; }
+  table.ranking td.sala-nombre { background: #f9fafb; }
   .dos-col { display: grid; grid-template-columns: 1.1fr 1fr; gap: 14px; }
   .resumen h2 { margin: 10px 0 5px; } .resumen .kpi td, .resumen .kpi th { padding: 3px 8px; }
   .resumen ul.limpia li { margin: 2px 0; } .resumen .pcard { font-size: 9.6px; padding: 6px 9px; }
@@ -209,10 +215,10 @@ function paginaRanking(z, extras) {
 
   return `<section class="pag">
     ${cab(`${esc(z.zona)} · Ranking de intervención por sala`, "Dónde actuar primero, por supervisor", `${altas.length} problemas de prioridad alta<br>${medias.length} de prioridad media`)}
-    <table class="compacta">
+    <table class="compacta ranking">
       <tr><th class="l">Sala</th><th>Prioridad</th><th class="l">Problema</th><th>Resultado / meta</th><th class="r">Monto</th><th>Persiste</th><th class="l">Acción inicial</th></tr>
-      ${grupos.map((g) => `<tr class="grupo"><td colspan="7">${esc(g.sup.nombre)} · ${g.altas} alta${g.altas === 1 ? "" : "s"}${g.n > g.altas ? ` · ${g.n - g.altas} media${g.n - g.altas === 1 ? "" : "s"}` : ""}</td></tr>
-        ${g.salas.map((l) => l.map((p, i) => `<tr>${i === 0 ? `<td class="l b" rowspan="${l.length}">${esc(p.sala.nombre)}</td>` : ""}<td>${prioTag(p.prioridad)}</td>
+      ${grupos.map((g, gi) => `${gi ? `<tr class="espacio"><td colspan="7"></td></tr>` : ""}<tr class="grupo"><td colspan="7">${esc(g.sup.nombre)} <span class="x">· ${g.salas.length} sala${g.salas.length === 1 ? "" : "s"} · ${g.altas} alta${g.altas === 1 ? "" : "s"}${g.n > g.altas ? ` · ${g.n - g.altas} media${g.n - g.altas === 1 ? "" : "s"}` : ""}</span></td></tr>
+        ${g.salas.map((l) => l.map((p, i) => `<tr${i === 0 ? ` class="sala-ini"` : ""}>${i === 0 ? `<td class="l b sala-nombre" rowspan="${l.length}">${esc(p.sala.nombre)}</td>` : ""}<td>${prioTag(p.prioridad)}</td>
           <td class="l">${esc(p.detalle)}</td><td>${resultado(p)}</td><td class="r">${p.tipo === "venta_perdida" ? clp(p.valor) : "—"}</td>
           <td>${p.persistente ? "Sí" : "–"}</td><td class="l">${esc(p.corto)}</td></tr>`).join("")).join("")}`).join("")}
     </table>
