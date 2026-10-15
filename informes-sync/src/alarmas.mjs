@@ -198,6 +198,44 @@ export function leerImperdonables({ lineas, marcas }) {
   }).filter((x) => x.metrica && !/^SUBMETRICA$/i.test(x.metrica));
 }
 
+// Etiquetas del PDF → códigos de la encuesta (mobile/src/types/encuesta.ts:
+// EstrategiaIce y PopIce). Se prueban en orden.
+const ICE_ESTRATEGIAS = [
+  [/^MEALS/i, "MEALS"], [/^MORNING TIME/i, "MORNING_TIME"], [/BREAK/i, "BREAK"], [/^REPLENISH/i, "REPLENISH_TIME"],
+  [/^LUNCH BOX/i, "LUNCH_BOX"], [/^YUMMY/i, "YUMMY_SNACKING"], [/^SOCIALIZING/i, "SOCIALIZING"], [/^DUALS/i, "DUALS"],
+];
+const ICE_POPS = [[/^POP MEALS/i, "MEALS"], [/^POP MORNING/i, "MORNING_TIME"], [/^POP BREAK/i, "BREAK"]];
+
+/**
+ * Estrategias ICE y POP de comunicación del "RESUMEN RED" (solo NARTD). Cada
+ * fila tiene la etiqueta (x≈50, a veces partida en dos líneas) y la NOTA
+ * (x≈360, "100%" o "0%") a la misma altura. Devuelve
+ * [{ tipo: "ESTRATEGIA" | "POP", codigo, nota }] con nota entre 0 y 1.
+ */
+export function leerIce({ lineas }) {
+  const tramo = (desde, hasta, tipo, mapa) => {
+    const ini = lineas.findIndex((l) => desde.test(l.texto));
+    if (ini < 0) return [];
+    let fin = lineas.findIndex((l, i) => i > ini && hasta.test(l.texto));
+    if (fin < 0) fin = Math.min(lineas.length, ini + 80);
+    const sec = lineas.slice(ini + 1, fin);
+    const notas = sec.filter((l) => l.x > 340 && l.x < 400 && /^\d+(\.\d+)?%$/.test(l.texto));
+    const out = [];
+    for (const n of notas) {
+      const etiqueta = sec
+        .filter((l) => l.pagina === n.pagina && l.x >= 40 && l.x < 280 && Math.abs(l.y - n.y) <= 20)
+        .sort((a, b) => Math.abs(a.y - n.y) - Math.abs(b.y - n.y))[0];
+      const cod = etiqueta && mapa.find(([re]) => re.test(etiqueta.texto))?.[1];
+      if (cod && !out.some((o) => o.codigo === cod)) out.push({ tipo, codigo: cod, nota: Number(n.texto.replace("%", "")) / 100 });
+    }
+    return out;
+  };
+  return [
+    ...tramo(/^ESTRATEGIA ICE \(/i, /^NSF \(|^COMUNICACION \(/i, "ESTRATEGIA", ICE_ESTRATEGIAS),
+    ...tramo(/^COMUNICACION \(/i, /^CATALOGOS \(|^\*?Fecha medicion/i, "POP", ICE_POPS),
+  ];
+}
+
 function leerDatosPdf(lineas) {
   const todo = lineas.map((l) => l.texto).join("\n");
   const med = todo.match(/Hora medici\S*n\s*:\s*\n?(\d{4}-\d{2}-\d{2})\s*\((\d{2}:\d{2})\)/i);
@@ -211,15 +249,15 @@ function leerDatosPdf(lineas) {
 }
 
 /**
- * Alarmas NARTD ya registradas que todavía no tienen sus imperdonables (las
- * de antes de que se leyera esa sección): se buscan por Message-ID en la
+ * Alarmas NARTD ya registradas que todavía no tienen sus imperdonables o su
+ * ICE (las de antes de que se leyeran esas secciones): se buscan por Message-ID en la
  * bandeja y en la papelera (Gmail las guarda 30 días) y se completan. Usa la
  * conexión IMAP ya abierta; la bandeja queda bloqueada por el llamador, así
  * que la papelera se abre aparte y al final se vuelve a INBOX.
  */
 async function completarImperdonables(sb, imap) {
   const { data, error } = await sb.from("alarmas_b2b").select("message_id")
-    .eq("categoria", "NARTD").eq("imperdonables", "[]")
+    .eq("categoria", "NARTD").or("imperdonables.eq.[],ice.eq.[]")
     .gte("medido_at", new Date(Date.now() - 30 * 86400000).toISOString());
   if (error) throw new Error(`alarmas_b2b: ${error.message}`);
   if (!data.length) return 0;
@@ -236,12 +274,14 @@ async function completarImperdonables(sb, imap) {
       const correo = await simpleParser(msg.source);
       const pdf = correo.attachments.find((a) => a.contentType === "application/pdf" && /ALARMA/i.test(a.filename ?? ""));
       if (!pdf) continue;
-      const imperdonables = leerImperdonables(await leerPdf(pdf.content));
-      const { error: e2 } = await sb.rpc("alarma_registrar_imperdonables", { p_message_id: mid, p_imperdonables: imperdonables });
-      if (e2) throw new Error(`alarma_registrar_imperdonables: ${e2.message}`);
+      const leido = await leerPdf(pdf.content);
+      const imperdonables = leerImperdonables(leido);
+      const ice = leerIce(leido);
+      const { error: e2 } = await sb.rpc("alarma_registrar_medicion", { p_message_id: mid, p_imperdonables: imperdonables, p_ice: ice });
+      if (e2) throw new Error(`alarma_registrar_medicion: ${e2.message}`);
       faltan.delete(mid);
       n++;
-      console.log(`imperdonables ${imperdonables.filter((x) => x.encontrado).length}/${imperdonables.length} completados · ${correo.subject}`);
+      console.log(`imperdonables ${imperdonables.filter((x) => x.encontrado).length}/${imperdonables.length} · ICE ${ice.filter((x) => x.nota >= 1).length}/${ice.length} completados · ${correo.subject}`);
     }
   }
   await imap.mailboxOpen("INBOX");
@@ -282,13 +322,14 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
       const correo = await simpleParser(msg.source);
       const asunto = leerAsunto(correo.subject);
       const pdf = correo.attachments.find((a) => a.contentType === "application/pdf" && /ALARMA/i.test(a.filename ?? ""));
-      let promociones = [], imperdonables = [], datos = { medidoAt: null, folio: null, visita: null };
+      let promociones = [], imperdonables = [], ice = [], datos = { medidoAt: null, folio: null, visita: null };
       let legible = !!(asunto && pdf);
       if (asunto && pdf) {
         try {
           const leido = await leerPdf(pdf.content);
           promociones = leerCatalogo(leido, asunto.categoria);
           imperdonables = leerImperdonables(leido);
+          ice = leerIce(leido);
           datos = leerDatosPdf(leido.lineas);
         } catch (e) {
           legible = false;
@@ -303,6 +344,7 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
         p_medido_at: datos.medidoAt ?? correo.date?.toISOString() ?? new Date().toISOString(),
         p_detalle: promociones,
         p_imperdonables: imperdonables,
+        p_ice: ice,
       });
       if (error) throw new Error(`catalogo_cargar_alarma: ${error.message}`);
       if (legible) aPapelera.push(msg.uid);
