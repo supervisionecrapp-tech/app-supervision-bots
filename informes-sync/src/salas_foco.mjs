@@ -136,84 +136,95 @@ function salasFoco(salas, porSala, metas) {
   return out.sort((a, b) => b.gap - a.gap);
 }
 
-// ---------------------------------------------------------------- textos
+// ---------------------------------------------------------------- brecha a meta
 
-function tendencia(serie) {
-  const v = serie.filter((x) => x != null);
-  if (v.length < 3) return null;
-  if (v[0] < v[1] && v[1] < v[2]) return "sube";
-  if (v[0] > v[1] && v[1] > v[2]) return "baja";
-  return null;
-}
-const serieTxt = (serie) => serie.map((x) => pct(x)).join(" a ");
-const listaY = (xs) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`);
+/** Componentes de cada categoría RED con su peso nominal en la nota. */
+const COMPONENTES = {
+  nartd: [
+    ["nss_pct", "NSS · disponibilidad", 0.20], ["sovi_pct", "SOVI · espacio en góndola", 0.35],
+    ["estrat_ice_pct", "Estrategia ICE", 0.20], ["exhib_pactadas_pct", "Exhibición pactada", 0.12],
+    ["nsf_pct", "NSF · nivel de frío", 0.05], ["catalogos_pct", "Catálogos", 0.05], ["com_pop_pct", "Comunicación POP", 0.03],
+  ],
+  abi: [["nss_pct", "NSS · disponibilidad", 0.25], ["sovi_pct", "SOVI · espacio en góndola", 0.25],
+    ["exhib_adicionales_pct", "Exhibición adicional", 0.25], ["catalogos_pct", "Catálogos", 0.25]],
+  vsr: [["nss_pct", "NSS · disponibilidad", 0.5], ["catalogos_pct", "Catálogos", 0.5]],
+};
+const CORTO = { "NSS · disponibilidad": "NSS", "SOVI · espacio en góndola": "SOVI", "Estrategia ICE": "ICE", "Exhibición pactada": "Exhib.",
+  "NSF · nivel de frío": "NSF", "Catálogos": "Catál.", "Comunicación POP": "POP", "Exhibición adicional": "Exhib." };
 
-function lineamientosZona({ zona, ind, metas, supervisores, foco, totalSalas, cadem }) {
-  const w = ind[2];
-  const out = [];
-  const enMeta = [], fuera = [];
-  for (const c of RED) if (w[c.key] != null) (w[c.key] >= metas[c.meta] ? enMeta : fuera).push(`${c.label} ${pct(w[c.key])}`);
-  for (const p of PRES) if (w[p.key] != null) (w[p.key] >= metas.presentismo ? enMeta : fuera).push(`${p.corto.replace("Pres. ", "presentismo ")} ${pct(w[p.key])}`);
-  if (enMeta.length) out.push(`<b>En meta:</b> ${listaY(enMeta)}.`);
-  if (fuera.length) out.push(`<b>Fuera de meta:</b> ${listaY(fuera)}.`);
-
-  for (const p of PRES) {
-    const t = tendencia(ind.map((x) => x[p.key]));
-    if (t) out.push(`${p.label} ${t === "sube" ? "sube" : "baja"} tres semanas seguidas (${serieTxt(ind.map((x) => x[p.key]))}).`);
-  }
-  // Supervisor más débil en cada indicador fuera de meta.
-  const debiles = [];
-  for (const c of [...RED, ...PRES.map((p) => ({ key: p.key, label: p.corto, meta: "presentismo" }))]) {
-    if (w[c.key] == null || w[c.key] >= metas[c.meta]) continue;
-    const peor = supervisores.filter((s) => s.ind[2][c.key] != null).sort((a, b) => a.ind[2][c.key] - b.ind[2][c.key])[0];
-    if (peor && supervisores.length > 1) debiles.push(`${c.label} más bajo: ${esc(peor.nombre)}${peor.subzona ? ` (${esc(peor.subzona)})` : ""} con ${pct(peor.ind[2][c.key])}`);
-  }
-  if (debiles.length) out.push(`${debiles.join("; ")}.`);
-  if (cadem.total > 0) {
-    const [c1, c2] = cadem.causas;
-    out.push(`<b>Venta perdida Cadem:</b> ${milCLP(cadem.total)}; ${Math.round(c1.pct * 100)}% es ${c1.label.toLowerCase()}${c2 ? ` y ${Math.round(c2.pct * 100)}% ${c2.label.toLowerCase()}` : ""}. La sala que más pierde es ${esc(cadem.salas[0].nombre)} (${milCLP(cadem.salas[0].total)}).`);
-  }
-  out.push(`<b>Salas foco:</b> son ${foco} de ${totalSalas}. Cada supervisor debe cerrar un plan semanal para las suyas, cargado como tarea en la app.`);
-  out.push(`Una sala sin RED cargado en la semana (–) no está en 0%: pedir la carga antes de evaluarla.`);
-  return out;
+/**
+ * Puntos de la nota RED que pierde una sala en cada componente. Se reparte
+ * lo que le falta para 100% según el peso de cada componente y lo que le
+ * falta en él; si un componente no aplica (vacío), su peso se reparte entre
+ * los demás. El reparto se escala a la nota real, así la suma de lo perdido
+ * es exactamente 100% − RED de la sala.
+ */
+function perdidasSala(fila, cat) {
+  const red = fila?.red_pct == null ? null : Number(fila.red_pct);
+  if (red == null) return null;
+  const comps = COMPONENTES[cat].filter(([col]) => fila[col] != null)
+    .map(([col, label, peso]) => ({ col, label, peso, nota: Number(fila[col]) }));
+  const crudo = comps.map((c) => c.peso * Math.max(0, 1 - c.nota));
+  const total = crudo.reduce((a, b) => a + b, 0);
+  const escala = total > 0 ? Math.max(0, 1 - red) / total : 0;
+  return { red, comps: comps.map((c, i) => ({ ...c, pierde: crudo[i] * escala })) };
 }
 
-function lineamientosSupervisor({ ind, metas, foco, cadem }) {
-  const w = ind[2];
-  const out = [];
-  for (const p of PRES) {
-    if (w[p.key] == null) continue;
-    const serie = ind.map((x) => x[p.key]);
-    if (w[p.key] >= metas.presentismo) { out.push(`<b>${p.label} en meta</b> (${pct(w[p.key])}). Mantener.`); continue; }
-    const peores = foco.filter((s) => s.d.presTipo === p.key && s.d.pres3 != null && s.d.pres3 < metas.presentismo)
-      .sort((a, b) => a.d.pres3 - b.d.pres3).slice(0, 3);
-    const t = tendencia(serie);
-    out.push(`<b>${p.label} ${pct(w[p.key])}</b>${t ? ` y ${t === "sube" ? "mejorando" : "bajando"} (${serieTxt(serie)})` : ""}.`
-      + (peores.length ? ` Las más bajas en tres semanas: ${listaY(peores.map((s) => `${esc(s.nombre)} (${pct(s.d.pres3, 0)})`))}.` : ""));
+/**
+ * Brecha de un grupo de salas a la meta de una categoría, por componente, y
+ * el plan mínimo: las acciones sala × componente ordenadas por cuánto suben
+ * el promedio del grupo si ese componente llega a 100% en esa sala,
+ * acumuladas hasta alcanzar la meta.
+ */
+function brecha(salas, compPorSala, cat, meta) {
+  const filas = salas.map((s) => ({ s, p: perdidasSala(compPorSala.get(s.sala_id), cat) })).filter((x) => x.p);
+  const n = filas.length;
+  if (!n) return null;
+  const promedio = filas.reduce((a, x) => a + x.p.red, 0) / n;
+  const porComp = new Map();
+  for (const { p } of filas) for (const c of p.comps) {
+    const g = porComp.get(c.label) ?? { label: c.label, pierde: 0, notas: [] };
+    g.pierde += c.pierde / n; g.notas.push(c.nota); porComp.set(c.label, g);
   }
-  const redFuera = RED.filter((c) => w[c.key] != null && w[c.key] < metas[c.meta]);
-  const redOk = RED.filter((c) => w[c.key] != null && w[c.key] >= metas[c.meta]);
-  if (redFuera.length) {
-    const partes = redFuera.map((c) => {
-      const peores = foco.filter((s) => s.d.red[c.key] != null && s.d.red[c.key] < metas[c.meta])
-        .sort((a, b) => a.d.red[c.key] - b.d.red[c.key]).slice(0, 3);
-      return `${c.label} en ${pct(w[c.key])}${peores.length ? ` (${listaY(peores.map((s) => `${esc(s.nombre)} ${pct(s.d.red[c.key], 0)}`))})` : ""}`;
-    });
-    out.push(`<b>RED:</b> ${partes.join("; ")}.${redOk.length ? ` ${listaY(redOk.map((c) => c.label))} en meta.` : ""}`);
-  } else if (redOk.length) {
-    out.push(`<b>RED en meta</b> en ${listaY(redOk.map((c) => c.label))}.`);
+  const componentes = [...porComp.values()]
+    .map((g) => ({ ...g, nota: g.notas.reduce((a, b) => a + b, 0) / g.notas.length }))
+    .sort((a, b) => b.pierde - a.pierde);
+  const falta = Math.max(0, meta - promedio);
+  const acciones = filas.flatMap(({ s, p }) => p.comps.filter((c) => c.pierde > 0.0005)
+    .map((c) => ({ sala: s, comp: c.label, nota: c.nota, sube: c.pierde / n })))
+    .sort((a, b) => b.sube - a.sube);
+  const plan = [];
+  let proyectado = promedio;
+  for (const a of acciones) {
+    if (proyectado >= meta) break;
+    proyectado += a.sube;
+    plan.push({ ...a, proyectado });
   }
-  if (cadem.total > 0) {
-    const c1 = cadem.causas[0];
-    let t = `<b>Cadem:</b> ${milCLP(cadem.total)}; el ${Math.round(c1.pct * 100)}% es ${c1.label.toLowerCase()}.`;
-    const larga = cadem.filas.filter((r) => r.dias >= 7).sort((a, b) => b.vp - a.vp)[0];
-    if (larga) t += ` ${esc(larga.sala)} tiene ${esc(larga.sku)} con ${larga.dias} días sin venta (${milCLP(larga.vp)}): revisar ${/stock/i.test(larga.causa) ? "inventario y abastecimiento" : "la reposición"}.`;
-    const s0 = cadem.salas[0];
-    if (s0 && s0.total / cadem.total >= 0.4) t += ` ${esc(s0.nombre)} concentra ${milCLP(s0.total)}.`;
-    out.push(t);
-  }
-  return out;
+  return { n, promedio, meta, falta, componentes, plan, alcanza: proyectado >= meta, maximo: promedio + acciones.reduce((t, a) => t + a.sube, 0) };
 }
+
+/** Horas de presentismo que faltan en la semana, por sala, con los días críticos. */
+function horasFaltantes(salas, diasPorSala) {
+  const DIA = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+  return salas.map((s) => {
+    const dias = diasPorSala.get(s.sala_id) ?? [];
+    const obj = dias.reduce((a, d) => a + d.objetivo, 0);
+    const real = dias.reduce((a, d) => a + d.real, 0);
+    const criticos = dias.filter((d) => d.real < d.objetivo * 0.75)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha))
+      .map((d) => `${DIA[new Date(d.fecha + "T12:00:00Z").getUTCDay()]} ${nf(d.real, 0)}/${nf(d.objetivo, 0)} h`);
+    return { ...s, obj, real, falta: obj - real, criticos };
+  }).filter((x) => x.obj > 0);
+}
+
+const ACCION_CAUSA = {
+  "GONDOLA SIN REPOSICION": "Reponer góndola (hay stock en sala)",
+  "SIN STOCK": "Generar pedido / revisar abastecimiento",
+  "STOCK ESTATICO": "Ajustar inventario (stock que no se vende)",
+  "STOCK NEGATIVO": "Ajustar inventario (stock negativo)",
+  "SIN INFORMACION B2B": "Validar datos B2B con la cadena",
+};
+const accionDe = (causa) => ACCION_CAUSA[causa] ?? "Revisar";
 
 // ---------------------------------------------------------------- HTML
 
@@ -240,6 +251,11 @@ const CSS = `
   td { text-align: center; padding: 4px 6px; border-bottom: 1px solid #eef0f2; }
   th.l, td.l { text-align: left; } td.r, th.r { text-align: right; } td.b { font-weight: 600; }
   td.bad { color: #b91c1c; background: #fde8e8; font-weight: 700; } td.ok { color: #15803d; } td.na { color: #9ca3af; }
+  td.warn { color: #92400e; background: #fef3c7; font-weight: 600; } .okt { color: #15803d; font-weight: 600; }
+  td .x, .x { color: #6b7280; font-size: 9px; font-weight: 400; }
+  tr.tot td { font-weight: 700; border-top: 1.5px solid #d1d5db; }
+  .linea { margin: 8px 0 5px; font-size: 11px; }
+  table.matriz td, table.matriz th { padding: 3px 4px; }
   tr { break-inside: avoid; }
   .caja { border: 1px solid #e5e7eb; background: #f9fafb; border-radius: 5px; padding: 8px 12px; font-size: 11px; }
   .caja ul { margin: 0; padding-left: 16px; } .caja li { margin: 3px 0; }
@@ -275,17 +291,80 @@ function tarjetas(ind, metas, sem, cadem) {
   </div>`;
 }
 const celda = (v, meta, dec = 1) => `<td class="${v == null ? "na" : v >= meta ? "ok" : "bad"}">${pct(v, dec)}</td>`;
+/** Color de la nota de un componente: rojo bajo 70%, ámbar bajo 90%. */
+const celdaComp = (v) => `<td class="${v == null ? "na" : v < 0.7 ? "bad" : v < 0.9 ? "warn" : "ok"}">${pct(v, 0)}</td>`;
+const pts = (v, dec = 1) => (v == null ? "–" : nf(v * 100, dec));
 
-function tablaFoco(foco, metas, sem) {
-  if (!foco.length) return `<p class="vacio">Ninguna sala cumple el criterio de sala foco esta semana.</p>`;
-  return `<table>
-    <tr><th class="l" rowspan="2">Sala</th><th colspan="3">RED S${sem[2]}</th><th colspan="4">Presentismo</th></tr>
-    <tr><th>NARTD</th><th>ABI</th><th>VSR</th><th>S${sem[0]}</th><th>S${sem[1]}</th><th>S${sem[2]}</th><th>3 sem.</th></tr>
-    ${foco.map((s, i) => `<tr><td class="l b">${i + 1}. ${esc(s.nombre)}</td>
-      ${RED.map((c) => celda(s.d.red[c.key], metas[c.meta], 0)).join("")}
-      ${s.d.presSem.map((v) => celda(v, metas.presentismo, 0)).join("")}${celda(s.d.pres3, metas.presentismo, 0)}</tr>`).join("")}
-  </table>
-  <p class="nota">Rojo = fuera de meta. "–" = sin dato en la semana. Orden: mayor distancia total a la meta.</p>`;
+/** Tabla de brecha a meta de un grupo: una fila por categoría. */
+function tablaBrecha(brechas, metas) {
+  const filas = RED.map((c) => {
+    const b = brechas[c.key];
+    if (!b) return `<tr><td class="l b">${c.label}</td><td colspan="5" class="na">Sin carga RED esta semana</td></tr>`;
+    const top = b.componentes.slice(0, 3).map((k) => `${esc(CORTO[k.label] ?? k.label)} −${pts(k.pierde)} <span class="x">(nota ${pct(k.nota, 0)})</span>`).join(" · ");
+    const acciones = b.falta <= 0 ? `<span class="okt">En meta</span>`
+      : b.alcanza ? `<b>${b.plan.length}</b> acciones sala × componente`
+      : `No alcanza: aun con todo a 100% queda en ${pct(b.maximo)}`;
+    return `<tr><td class="l b">${c.label}</td>${celda(b.promedio, metas[c.meta])}<td>${pct(metas[c.meta], 0)}</td>
+      <td class="b">${b.falta > 0 ? `${pts(b.falta)} pts` : "–"}</td><td class="l">${top}</td><td class="l">${acciones}</td></tr>`;
+  }).join("");
+  return `<table><tr><th class="l">Categoría</th><th>Nota</th><th>Meta</th><th>Falta</th><th class="l">Dónde se pierden puntos (de 100)</th><th class="l">Para llegar a la meta</th></tr>${filas}</table>`;
+}
+
+/** Plan mínimo para llegar a la meta en una categoría, acción por acción. */
+function caminoMeta(b, cat, limite = 12) {
+  if (!b) return "";
+  if (b.falta <= 0) return `<p class="linea"><b>${cat}</b> ${pct(b.promedio)}: en meta (${pct(b.meta, 0)}).</p>`;
+  const plan = b.plan.slice(0, limite);
+  const fin = b.plan[b.plan.length - 1];
+  const cabecera = b.alcanza
+    ? `<b>${cat}</b> ${pct(b.promedio)} → meta ${pct(b.meta, 0)}: faltan <b>${pts(b.falta)} pts</b>. Con estas <b>${b.plan.length} acciones</b> llega a <b>${pct(fin.proyectado)}</b>.`
+    : `<b>${cat}</b> ${pct(b.promedio)} → meta ${pct(b.meta, 0)}: faltan <b>${pts(b.falta)} pts</b>. Ni con todos los componentes a 100% se llega: el máximo es ${pct(b.maximo)} (hay salas sin carga o la meta exige más de lo que se mide).`;
+  return `<p class="linea">${cabecera}</p>
+    <table><tr><th>#</th><th class="l">Sala</th><th class="l">Llevar a 100%</th><th>Nota hoy</th><th>Sube</th><th>Queda en</th></tr>
+    ${plan.map((a, i) => `<tr><td>${i + 1}</td><td class="l b">${esc(a.sala.nombre)}</td><td class="l">${esc(a.comp)}</td>
+      ${celdaComp(a.nota)}<td>+${pts(a.sube, 2)}</td><td class="${a.proyectado >= b.meta ? "okt b" : ""}">${pct(a.proyectado)}</td></tr>`).join("")}
+    </table>${b.plan.length > limite ? `<p class="nota">Y ${b.plan.length - limite} acciones más, de menor impacto, hasta completar las ${b.plan.length}.</p>` : ""}`;
+}
+
+/** Matriz de salas foco: nota RED y componentes NARTD, para ver dónde pierde cada una. */
+function matrizFoco(salas, z, metas) {
+  if (!salas.length) return `<p class="vacio">Ninguna sala cumple el criterio de sala foco esta semana.</p>`;
+  const comps = COMPONENTES.nartd;
+  return `<table class="matriz"><tr><th class="l" rowspan="2">Sala</th><th colspan="${comps.length + 1}">NARTD</th><th rowspan="2">ABI</th><th rowspan="2">VSR</th><th rowspan="2">Pres.<br>3 sem.</th></tr>
+    <tr><th>Nota</th>${comps.map(([, label]) => `<th>${esc(CORTO[label])}</th>`).join("")}</tr>
+    ${salas.map((s) => {
+      const f = z.comp.nartd.get(s.sala_id);
+      return `<tr><td class="l b">${esc(s.nombre)}</td>${celda(s.d.red.nartd, metas.red_nartd, 0)}
+        ${comps.map(([col]) => celdaComp(f?.[col] == null ? null : Number(f[col]))).join("")}
+        ${celda(s.d.red.abi, metas.red_abi, 0)}${celda(s.d.red.vsr, metas.red_vsr, 0)}${celda(s.d.pres3, metas.presentismo, 0)}</tr>`;
+    }).join("")}</table>
+    <p class="nota">Componentes: rojo bajo 70%, ámbar bajo 90%. "–" = no aplica o sin carga.</p>`;
+}
+
+/** Salas con horas de presentismo faltantes en la semana y sus días críticos. */
+function tablaHoras(horas, limite = 10) {
+  const con = horas.filter((h) => h.falta >= 0.5).sort((a, b) => b.falta - a.falta);
+  if (!con.length) return `<p class="vacio">Todas las salas con objetivo de horas lo cumplieron esta semana.</p>`;
+  const total = con.reduce((a, h) => a + h.falta, 0);
+  return `<p class="linea">Faltan <b>${nf(total, 0)} h</b> en ${con.length} sala${con.length === 1 ? "" : "s"}, el equivalente a <b>${nf(total / 42, 1)}</b> jornadas completas de 42 h.</p>
+    <table><tr><th class="l">Sala</th><th>Objetivo</th><th>Cumplidas</th><th>Faltan</th><th class="l">Días bajo 75% (cumplidas/objetivo)</th></tr>
+    ${con.slice(0, limite).map((h) => `<tr><td class="l b">${esc(h.nombre)}</td><td>${nf(h.obj, 0)} h</td><td>${nf(h.real, 0)} h</td>
+      <td class="bad">${nf(h.falta, 0)} h</td><td class="l">${esc(h.criticos.join(" · ") || "Déficit repartido en la semana")}</td></tr>`).join("")}
+    </table>${con.length > limite ? `<p class="nota">Y ${con.length - limite} salas más con déficit menor.</p>` : ""}`;
+}
+
+/** Venta perdida agrupada por la acción que la recupera. */
+function tablaAcciones(cadem) {
+  if (!cadem.total) return `<p class="vacio">Sin datos de causas de quiebre esta semana.</p>`;
+  const porAccion = new Map();
+  for (const r of cadem.filas) {
+    const g = porAccion.get(r.accion) ?? { accion: r.accion, vp: 0, skus: 0, salas: new Set() };
+    g.vp += r.vp; g.skus++; g.salas.add(r.salaId); porAccion.set(r.accion, g);
+  }
+  return `<table><tr><th class="l">Acción</th><th class="r">Venta perdida</th><th>%</th><th>SKU × sala</th><th>Salas</th></tr>
+    ${[...porAccion.values()].sort((a, b) => b.vp - a.vp).map((g) => `<tr><td class="l b">${esc(g.accion)}</td><td class="r">${clp(g.vp)}</td>
+      <td>${Math.round((g.vp / cadem.total) * 100)}%</td><td>${g.skus}</td><td>${g.salas.size}</td></tr>`).join("")}
+    <tr class="tot"><td class="l">Total recuperable</td><td class="r">${clp(cadem.total)}</td><td>100%</td><td>${cadem.filas.length}</td><td>${cadem.salas.length}</td></tr></table>`;
 }
 
 function seccionVisitas(visitas, fecha) {
@@ -314,27 +393,19 @@ function duracion(min) {
 }
 
 function paginaCadem(sup, cadem, sem, focoIds) {
-  const max = Math.max(...cadem.causas.map((c) => c.vp));
   return `<section class="pag">
-    <div class="cab"><div><h1>${esc(sup.nombre)}</h1><div class="s">Venta perdida Cadem (Datawalt) · Semana ${sem} · los 3 SKU más conflictivos por sala</div></div>
+    <div class="cab"><div><h1>${esc(sup.nombre)}</h1><div class="s">Venta perdida Cadem (Datawalt) · Semana ${sem} · qué hacer en cada sala</div></div>
       <div class="d">${clp(cadem.total)} en ${cadem.salas.length} salas con datos<br>★ = sala foco</div></div>
-    <div class="dos">
-      <div><h2>Causas del quiebre</h2><table>
-        ${cadem.causas.map((c) => `<tr><td class="l b">${esc(c.label)}</td><td class="r">${clp(c.vp)}</td><td class="r">${Math.round(c.pct * 100)}%</td>
-          <td class="l" style="width:45%"><span class="barra" style="width:${Math.max(2, (c.vp / max) * 100)}%"></span></td></tr>`).join("")}
-      </table></div>
-      <div><h2>Top 3 SKU del supervisor</h2><table>
-        ${cadem.skus.slice(0, 3).map((s, i) => `<tr><td class="l b">${i + 1}. ${esc(s.sku)}</td><td class="r">${clp(s.vp)}</td></tr>`).join("")}
-      </table></div>
-    </div>
-    <h2>Detalle por sala (mayor a menor venta perdida)</h2>
+    <h2>Qué recupera la venta perdida</h2>
+    ${tablaAcciones(cadem)}
+    <h2>Detalle por sala: los 3 SKU que más pierden</h2>
     <table>
-      <tr><th class="l">Sala</th><th class="l">SKU</th><th class="l">Causa</th><th>Días sin venta</th><th class="r">Venta perdida</th></tr>
+      <tr><th class="l">Sala</th><th class="l">SKU</th><th class="l">Acción</th><th>Días sin venta</th><th class="r">Venta perdida</th></tr>
       ${cadem.salas.map((s) => s.top.map((r, i) => `<tr>
         ${i === 0 ? `<td class="l sala b" rowspan="${s.top.length}">${focoIds.has(s.salaId) ? "★ " : ""}${esc(s.nombre)}<br><span class="x">${clp(s.total)} · ${s.n} SKU con quiebre</span></td>` : ""}
-        <td class="l b">${esc(r.sku)}</td><td class="l">${esc(r.causaLabel)}</td><td>${r.dias ?? "–"}</td><td class="r">${clp(r.vp)}</td></tr>`).join("")).join("")}
+        <td class="l b">${esc(r.sku)}</td><td class="l">${esc(r.accion)}</td><td class="${(r.dias ?? 0) >= 7 ? "bad" : ""}">${r.dias ?? "–"}</td><td class="r">${clp(r.vp)}</td></tr>`).join("")).join("")}
     </table>
-    <p class="nota">Fuente: Datawalt, reporte Embonor Agencia &gt; Causas del quiebre. Solo aparecen las salas que el reporte de la semana ${sem} trae con quiebre; las que no figuran no tienen datos, no necesariamente cero.</p>
+    <p class="nota">Acción según la causa que informa Datawalt: góndola sin reposición = reponer (hay stock en la sala); sin stock = pedido o abastecimiento; stock estático o negativo = ajuste de inventario. En rojo, 7 o más días sin venta. Solo aparecen las salas que el reporte de la semana ${sem} trae con quiebre.</p>
   </section>`;
 }
 
@@ -409,17 +480,35 @@ export async function cargarDatos(sb, { incluirVisitas = true } = {}) {
       if (data.length < 1000) return out;
     }
   };
-  const [s0, s1, s2, causas, visitas, metasRes, zonasRes] = await Promise.all([
+  // Componentes RED de la semana (la nota y lo que la compone), por categoría.
+  const traerComponentes = async (tabla, cat) => {
+    const w = semanas[2];
+    const cols = ["sala_id", "red_pct", ...COMPONENTES[cat].map(([c]) => c)].join(", ");
+    const { data, error } = await sb.from(tabla).select(cols).eq("anio", w.anio).eq("semana", w.semana);
+    if (error) throw new Error(`${tabla}: ${error.message}`);
+    return new Map(data.map((r) => [r.sala_id, r]));
+  };
+  const [s0, s1, s2, causas, visitas, metasRes, zonasRes, compNartd, compAbi, compVsr, presDias] = await Promise.all([
     ...semanas.map((w) => rpc("informe_salas_semana", { p_anio: w.anio, p_semana: w.semana })),
     traerCausas(),
     incluirVisitas ? rpc("informe_visitas_dia", { p_fecha: isoFecha(ayer) }) : [],
     sb.from("metas_indicadores").select("clave, valor"),
     sb.from("zonas").select("id, nombre"),
+    traerComponentes("red_nartd", "nartd"),
+    traerComponentes("red_abi", "abi"),
+    traerComponentes("red_vsr", "vsr"),
+    rpc("informe_presentismo_dias", { p_anio: semanas[2].anio, p_semana: semanas[2].semana }),
   ]);
   if (metasRes.error) throw new Error(`metas_indicadores: ${metasRes.error.message}`);
   await completarFocoIA(sb, visitas);
   if (zonasRes.error) throw new Error(`zonas: ${zonasRes.error.message}`);
+  const diasPorSala = new Map();
+  for (const d of presDias) {
+    if (!diasPorSala.has(d.sala_id)) diasPorSala.set(d.sala_id, []);
+    diasPorSala.get(d.sala_id).push({ fecha: d.fecha, objetivo: Number(d.objetivo), real: Number(d.real_topado) });
+  }
   return {
+    comp: { nartd: compNartd, abi: compAbi, vsr: compVsr }, diasPorSala,
     lunes, ayer, emitido: hoy, semanas, filasSem: [s0, s1, s2], causas, visitas, incluirVisitas,
     metas: Object.fromEntries(metasRes.data.map((m) => [m.clave, Number(m.valor)])),
     zonas: zonasRes.data,
@@ -451,8 +540,12 @@ export function armarZona(datos, zonaId) {
 
   const causas = datos.causas.filter((r) => ids.has(r.sala_id)).map((r) => ({
     salaId: r.sala_id, sala: salasZona.find((s) => s.sala_id === r.sala_id)?.nombre ?? "",
-    sku: titulo(r.sku_nombre), causa: r.causa, causaLabel: causaLabel(r.causa), dias: r.dias_sin_venta, vp: Number(r.venta_perdida),
+    sku: titulo(r.sku_nombre), causa: r.causa, causaLabel: causaLabel(r.causa), accion: accionDe(r.causa),
+    dias: r.dias_sin_venta, vp: Number(r.venta_perdida),
   }));
+
+  // Brecha a meta de cada categoría para un grupo de salas.
+  const brechas = (salas) => Object.fromEntries(RED.map((c) => [c.key, brecha(salas, datos.comp[c.key], c.key, metas[c.meta])]));
 
   const foco = salasFoco(salasZona, porSala, metas);
   const porSup = new Map();
@@ -467,13 +560,31 @@ export function armarZona(datos, zonaId) {
       ...g, subzona: titulo(moda(g.salas.map((s) => s.subzona))), ind: indicadores(sIds, filasSem),
       foco: foco.filter((s) => sIds.has(s.sala_id)),
       cadem: resumirCadem(causas.filter((r) => sIds.has(r.salaId))),
+      brechas: brechas(g.salas),
+      horas: horasFaltantes(g.salas, datos.diasPorSala),
     };
   }).sort((a, b) => (a.id === "sin") - (b.id === "sin") || a.nombre.localeCompare(b.nombre, "es"));
+
+  // Cuánto subiría el promedio de la zona si todas las salas de cada
+  // supervisor llegaran a la meta: dónde está la brecha de la zona.
+  const nZona = Object.fromEntries(RED.map((c) => [c.key, salasZona.filter((s) => datos.comp[c.key].get(s.sala_id)?.red_pct != null).length]));
+  for (const sup of supervisores) {
+    sup.aporte = Object.fromEntries(RED.map((c) => {
+      const meta = metas[c.meta];
+      const suma = sup.salas.reduce((a, s) => {
+        const r = datos.comp[c.key].get(s.sala_id)?.red_pct;
+        return a + (r == null ? 0 : Math.max(0, meta - Number(r)));
+      }, 0);
+      return [c.key, nZona[c.key] ? suma / nZona[c.key] : null];
+    }));
+  }
 
   const visitas = datos.visitas.filter((v) => v.zona_id === zonaId).map((v) => ({ ...v, salaNombre: nombreSala(v.sala) }));
   return {
     zona: titulo(zona?.nombre ?? ""), sem, metas, salasZona, foco, supervisores, visitas,
     ind: indicadores(ids, filasSem), cadem: resumirCadem(causas),
+    brechas: brechas(salasZona), horas: horasFaltantes(salasZona, datos.diasPorSala),
+    comp: datos.comp,
   };
 }
 
@@ -482,30 +593,32 @@ export function htmlZona(datos, z) {
   const emitido = ddmm(datos.emitido) + "-" + datos.emitido.getUTCFullYear();
   const rangoW = `${diaMes(datos.lunes)}–${diaMes(masDias(datos.lunes, 6))}`;
   const rango3 = `${diaMes(masDias(datos.lunes, -14))}–${diaMes(masDias(datos.lunes, 6))}`;
+  const horasTot = (h) => h.reduce((a, x) => a + Math.max(0, x.falta), 0);
 
+  // Dónde está la brecha de la zona: cuánto subiría el promedio si las salas
+  // de cada supervisor llegaran a la meta, más sus horas y venta perdida.
   const filaSup = (s) => `<tr><td class="l b">${esc(s.nombre)}</td><td>${esc(s.subzona ?? "–")}</td><td>${s.salas.length}</td>
-    ${RED.map((c) => celda(s.ind[2][c.key], metas[c.meta])).join("")}
-    ${PRES.map((p) => celda(s.ind[2][p.key], metas.presentismo)).join("")}
+    ${RED.map((c) => {
+      const v = s.ind[2][c.key], a = s.aporte[c.key];
+      return `<td class="${v == null ? "na" : v >= metas[c.meta] ? "ok" : "bad"}">${pct(v)}${a > 0.0005 ? `<span class="x"> · ${pts(a)} pts</span>` : ""}</td>`;
+    }).join("")}
+    <td>${horasTot(s.horas) >= 0.5 ? `${nf(horasTot(s.horas), 0)} h` : "–"}</td>
     <td class="r">${s.cadem.total ? clp(s.cadem.total) : "–"}</td><td class="b">${s.foco.length}</td></tr>`;
-
-  const top3 = z.cadem.skus.slice(0, 3).map((s) => `${esc(s.sku)} (${clp(s.vp)}, ${s.nSalas} sala${s.nSalas === 1 ? "" : "s"})`);
-  const cajaCadem = z.cadem.total
-    ? `<b>${clp(z.cadem.total)}</b> en ${z.cadem.salas.length} salas con datos. Causa principal: ${z.cadem.causas[0].label.toLowerCase()} (${Math.round(z.cadem.causas[0].pct * 100)}%)${z.cadem.causas[1] ? `, luego ${z.cadem.causas[1].label.toLowerCase()} (${Math.round(z.cadem.causas[1].pct * 100)}%)` : ""}. SKU más conflictivos de ${esc(z.zona)}: ${top3.join("; ")}.`
-    : `Sin datos de causas de quiebre cargados para la semana ${sem[2]}.`;
 
   const paginaZona = `<section class="pag">
     <div class="cab"><div><h1>${esc(z.zona)} · Salas foco por supervisor</h1><div class="s">Informe de gestión semanal</div></div>
       <div class="d">Emitido ${emitido}<br>RED y venta perdida Cadem: S${sem[2]} (${rangoW})<br>Presentismo: S${sem[0]}–S${sem[2]} (${rango3})</div></div>
     <h2>Total ${esc(z.zona)}</h2>
     ${tarjetas(z.ind, metas, sem, z.cadem)}
-    <h2>Resumen por supervisor (S${sem[2]})</h2>
-    <table><tr><th class="l">Supervisor</th><th>Subzona</th><th>Salas</th><th>NARTD</th><th>ABI</th><th>VSR</th><th>Pres. SMU</th><th>Pres. WM</th><th class="r">Vta. perdida Cadem</th><th>Salas foco</th></tr>
+    <h2>Brecha a la meta · S${sem[2]}</h2>
+    ${tablaBrecha(z.brechas, metas)}
+    <h2>Dónde está la brecha, por supervisor</h2>
+    <table><tr><th class="l">Supervisor</th><th>Subzona</th><th>Salas</th><th>NARTD</th><th>ABI</th><th>VSR</th><th>Horas faltantes</th><th class="r">Vta. perdida</th><th>Salas foco</th></tr>
       ${z.supervisores.map(filaSup).join("")}</table>
-    <h2>Venta perdida Cadem (Datawalt) · S${sem[2]}</h2>
-    <div class="caja">${cajaCadem}</div>
-    <h2>Lineamientos generales</h2>
-    <div class="caja"><ul>${lineamientosZona({ zona: z.zona, ind: z.ind, metas, supervisores: z.supervisores, foco: z.foco.length, totalSalas: z.salasZona.length, cadem: z.cadem }).map((l) => `<li>${l}</li>`).join("")}</ul></div>
-    <p class="nota">Metas del portal: RED NARTD ${pct(metas.red_nartd, 0)}, ABI ${pct(metas.red_abi, 0)}, VSR ${pct(metas.red_vsr, 0)}; presentismo ${pct(metas.presentismo, 0)}. <b>Sala foco:</b> RED y presentismo fuera de meta a la vez, o alguna categoría RED bajo 75%, o presentismo de las 3 semanas bajo 80%; se ordenan por la suma de puntos faltantes a la meta. Presentismo WM = horas realizadas sobre objetivo (sin Acuenta); SMU = horas cumplidas sobre objetivo (sin S10/Super 10), topado al objetivo diario. RED por supervisor = promedio simple. Cadem solo cubre las salas que Datawalt reporta con quiebre esa semana.</p>
+    <p class="nota">Junto a cada nota: cuántos puntos sube el promedio de ${esc(z.zona)} si todas las salas de ese supervisor llegan a la meta.</p>
+    <h2>Venta perdida Cadem · qué la recupera</h2>
+    ${tablaAcciones(z.cadem)}
+    <p class="nota">Metas: RED NARTD ${pct(metas.red_nartd, 0)}, ABI ${pct(metas.red_abi, 0)}, VSR ${pct(metas.red_vsr, 0)}; presentismo ${pct(metas.presentismo, 0)}. <b>Puntos por componente:</b> lo que le falta a cada sala para 100% se reparte entre sus componentes según el peso de cada uno (NARTD: NSS 20, SOVI 35, ICE 20, exhibición 12, NSF 5, catálogos 5, POP 3; ABI: 25 cada uno; VSR: NSS y catálogos 50) y se promedia en el grupo. <b>Acciones:</b> llevar un componente de una sala a 100%, ordenadas por cuánto suben el promedio. <b>Sala foco:</b> RED y presentismo fuera de meta a la vez, alguna categoría RED bajo 75% o presentismo de 3 semanas bajo 80%. Presentismo: WM sin Acuenta, SMU sin S10/Super 10, horas topadas al objetivo diario.</p>
   </section>`;
 
   const paginaVisitas = datos.incluirVisitas ? `<section class="pag">
@@ -516,15 +629,26 @@ export function htmlZona(datos, z) {
 
   const paginasSup = z.supervisores.filter((s) => s.id !== "sin").map((s) => {
     const focoIds = new Set(s.foco.map((f) => f.sala_id));
+    const fuera = RED.filter((c) => s.brechas[c.key] && s.brechas[c.key].falta > 0);
+    const enMeta = RED.filter((c) => s.brechas[c.key] && s.brechas[c.key].falta <= 0);
     return `<section class="pag">
       <div class="cab"><div><h1>${esc(s.nombre)}</h1><div class="s">Supervisor · Subzona ${esc(s.subzona ?? "–")} · ${s.salas.length} salas activas</div></div>
         <div class="d">${s.foco.length} salas foco<br>Semana ${sem[2]} · emitido ${emitido}</div></div>
-      <h2>Indicadores del supervisor</h2>
+      <h2>Indicadores</h2>
       ${tarjetas(s.ind, metas, sem, s.cadem)}
-      <h2>Salas foco (${s.foco.length} de ${s.salas.length})</h2>
-      ${tablaFoco(s.foco, metas, sem)}
-      <h2>Lineamientos para la semana</h2>
-      <div class="caja"><ul>${lineamientosSupervisor({ ind: s.ind, metas, foco: s.foco, cadem: s.cadem }).map((l) => `<li>${l}</li>`).join("")}</ul></div>
+      <h2>Brecha a la meta</h2>
+      ${tablaBrecha(s.brechas, metas)}
+      <h2>Camino a la meta</h2>
+      ${fuera.map((c) => caminoMeta(s.brechas[c.key], c.label)).join("")}
+      ${enMeta.length ? `<p class="linea">${enMeta.map((c) => `<b>${c.label}</b> ${pct(s.brechas[c.key].promedio)}`).join(" · ")}: en meta.</p>` : ""}
+    </section>
+    <section class="pag">
+      <div class="cab"><div><h1>${esc(s.nombre)}</h1><div class="s">Salas foco y presentismo · Semana ${sem[2]}</div></div>
+        <div class="d">${s.foco.length} de ${s.salas.length} salas foco</div></div>
+      <h2>Salas foco: dónde pierde puntos cada una</h2>
+      ${matrizFoco(s.foco, z, metas)}
+      <h2>Presentismo: horas que faltan · S${sem[2]}</h2>
+      ${tablaHoras(s.horas)}
     </section>${s.cadem.total ? paginaCadem(s, s.cadem, sem[2], focoIds) : ""}`;
   }).join("");
 
