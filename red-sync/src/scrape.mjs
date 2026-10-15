@@ -65,6 +65,9 @@ export async function scrapeRedExport({
   // no algo fijo) — con esto un reintento simplemente espera más en vez
   // de repetir el mismo timing que ya falló una vez.
   waitMultiplier = 1,
+  // Informe puntual (no es el sync semanal): marca el mes entero en el filtro
+  // en vez de una sola semana. El archivo sale como red-<CAT>-<año>-mes<mes>.xlsx.
+  mesCompleto = false,
 }) {
   const reportUrl = REPORT_URLS[categoria];
   if (!reportUrl) throw new Error(`No hay report URL calibrada para categoria=${categoria} todavía`);
@@ -135,7 +138,8 @@ export async function scrapeRedExport({
     await page.waitForTimeout(8000 * waitMultiplier);
     await debugShot(page, downloadDir, "02-red-detalle");
 
-    await selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitMultiplier);
+    if (mesCompleto) await selectMonth(frame, page, { anio, mes }, downloadDir, waitMultiplier);
+    else await selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitMultiplier);
 
     // El hover que revela los botones de la tabla lo resuelve
     // revelarHeaderTabla() (ver abajo): busca el contenedor del visual por
@@ -196,7 +200,9 @@ export async function scrapeRedExport({
       frame.locator('[data-testid="export-btn"]').click(),
     ]);
 
-    const filePath = `${downloadDir}/red-${categoria}-${anio}-${semana}.xlsx`;
+    const filePath = mesCompleto
+      ? `${downloadDir}/red-${categoria}-${anio}-mes${mes}.xlsx`
+      : `${downloadDir}/red-${categoria}-${anio}-${semana}.xlsx`;
     await download.saveAs(filePath);
     return filePath;
   } catch (err) {
@@ -301,6 +307,44 @@ async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitM
   await page.waitForTimeout(1500 * waitMultiplier);
   await debugShot(page, downloadDir, "03-filtro-semana");
   await verifyOnlyWeekSelected(frame, { mes, semana });
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(500 * waitMultiplier);
+  await cerrarDropdownSemana(frame, page, downloadDir, waitMultiplier);
+}
+
+// Igual que selectWeek, pero deja marcado el mes entero (todas sus semanas).
+async function selectMonth(frame, page, { anio, mes }, downloadDir, waitMultiplier = 1) {
+  await page.mouse.click(WEEK_FILTER_DROPDOWN.x, WEEK_FILTER_DROPDOWN.y);
+  await page.waitForTimeout(1000 * waitMultiplier);
+
+  const selectAll = frame.locator('.slicerItemContainer[title="Seleccionar todo"] .slicerCheckbox');
+  for (let intento = 0; intento < 4; intento++) {
+    const estado = await checkboxState(selectAll);
+    if (estado === "none") break;
+    await selectAll.click();
+    await page.waitForTimeout(700 * waitMultiplier);
+  }
+
+  const yearItem = frame.locator(`.slicerItemContainer[title="${anio}"][aria-level="1"]`);
+  await yearItem.locator(".expandButton").click();
+  await page.waitForTimeout(500 * waitMultiplier);
+
+  const monthItem = frame.locator(`.slicerItemContainer[title="${mes}"][aria-level="2"]`);
+  await monthItem.locator(".slicerCheckbox").click();
+  await page.waitForTimeout(1500 * waitMultiplier);
+  await debugShot(page, downloadDir, "03-filtro-mes");
+
+  const estadoMes = await checkboxState(monthItem.locator(".slicerCheckbox"));
+  if (estadoMes !== "all") throw new Error(`El mes ${mes} quedó "${estadoMes}" en el filtro`);
+  const otros = frame.locator('.slicerItemContainer[aria-level="2"]');
+  for (let i = 0; i < (await otros.count()); i++) {
+    const t = await otros.nth(i).getAttribute("title");
+    if (t === String(mes)) continue;
+    const e = await checkboxState(otros.nth(i).locator(".slicerCheckbox"));
+    if (e !== "none") throw new Error(`El mes ${t} está "${e}" y debería estar vacío`);
+  }
+  console.log(`Filtro de mes verificado: solo el mes ${mes} marcado.`);
 
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500 * waitMultiplier);

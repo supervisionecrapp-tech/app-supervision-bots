@@ -1,0 +1,51 @@
+name: Red mes (informe puntual)
+
+# Baja el export de RED (NARTD, ABI, VSR) de un mes entero y lo deja como
+# artefacto. No escribe en Supabase.
+on:
+  workflow_dispatch:
+    inputs:
+      anio:
+        description: "Año"
+        required: true
+        default: "2026"
+      mes:
+        description: "Mes (1-12)"
+        required: true
+        default: "9"
+
+jobs:
+  mes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        categoria: [NARTD, ABI, VSR]
+    defaults:
+      run:
+        working-directory: red-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Bajar export del mes
+        env:
+          CATEGORIA: ${{ matrix.categoria }}
+          ANIO: ${{ github.event.inputs.anio }}
+          MES: ${{ github.event.inputs.mes }}
+          DOWNLOAD_DIR: ./downloads-mes
+          DATAWALT_USER: ${{ secrets.DATAWALT_USER }}
+          DATAWALT_PASS: ${{ secrets.DATAWALT_PASS }}
+        run: node src/mes.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: red-mes-${{ matrix.categoria }}
+          path: |
+            red-sync/downloads-mes/*.xlsx
+            red-sync/downloads-mes/debug-*.png
+          if-no-files-found: ignore
