@@ -584,7 +584,7 @@ export function armarZona(datos, zonaId) {
     zona: titulo(zona?.nombre ?? ""), sem, metas, salasZona, foco, supervisores, visitas,
     ind: indicadores(ids, filasSem), cadem: resumirCadem(causas),
     brechas: brechas(salasZona), horas: horasFaltantes(salasZona, datos.diasPorSala),
-    comp: datos.comp,
+    comp: datos.comp, porSala, vpFilas: causas, zonaId,
   };
 }
 
@@ -673,4 +673,7 @@ export async function aPdf(htmls) {
   }
 }
 
-export { pct, clp, esc, diaLargo, ddmm };
+export {
+  pct, clp, esc, nf, pts, diaLargo, diaMes, ddmm, masDias, CSS, RED, PRES, COMPONENTES, CORTO,
+  perdidasSala, tarjetas, celda, celdaComp, seccionVisitas, tablaAcciones, matrizFoco, accionDe, causaLabel,
+};

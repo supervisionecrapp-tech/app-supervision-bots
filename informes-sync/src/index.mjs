@@ -10,7 +10,9 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { enviarCorreo, REMITENTE } from "./correo.mjs";
 import { cargarAlarmas } from "./alarmas.mjs";
-import { cargarDatos, armarZona, htmlZona, aPdf, pct, clp, esc, diaLargo } from "./salas_foco.mjs";
+import { cargarDatos, armarZona, aPdf, pct, clp, esc, diaLargo } from "./salas_foco.mjs";
+import { cargarExtrasGestion, registrarCompromisos } from "./gestion.mjs";
+import { htmlGestion } from "./gestion_html.mjs";
 
 const [modo = "prueba", arg1, arg2] = process.argv.slice(2);
 
@@ -27,12 +29,20 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
   const zonas = zonaId ? datos.zonas.filter((z) => z.id === zonaId) : [...datos.zonas].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
   if (!zonas.length) throw new Error(`Zona ${zonaId} no encontrada`);
   const armadas = zonas.map((z) => armarZona(datos, z.id)).filter((z) => z.salasZona.length);
-  const pdfs = await aPdf(armadas.map((z) => htmlZona(datos, z)));
+  // Informe de gestión: problemas por sala, compromisos y su seguimiento.
+  const htmls = [];
+  for (const z of armadas) {
+    const extras = await cargarExtrasGestion(sb, datos, z);
+    const n = await registrarCompromisos(sb, datos, z, extras);
+    console.log(`${z.zona}: ${extras.problemas.length} problemas, ${n} compromisos registrados, ${extras.previos.length} de la semana anterior.`);
+    htmls.push(htmlGestion(datos, z, extras));
+  }
+  const pdfs = await aPdf(htmls);
   const sem = datos.semanas[2].semana;
   const fecha = datos.emitido.toISOString().slice(0, 10);
 
   const adjuntos = armadas.map((z, i) => ({
-    filename: `informe_${z.zona.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_")}_salas_foco_${fecha}.pdf`,
+    filename: `informe_${z.zona.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_")}_gestion_semanal_${fecha}.pdf`,
     content: pdfs[i], contentType: "application/pdf",
   }));
 
@@ -50,10 +60,10 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
       </table>${visTxt}</div>`;
   };
   const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
-    <p>Adjunto el informe de salas foco por supervisor${armadas.length > 1 ? ", uno por zona" : ""}. Indicadores de la semana ${sem}${incluirVisitas ? " y visitas del día anterior" : ""}.</p>
+    <p>Adjunto el informe semanal de gestión${armadas.length > 1 ? ", uno por zona" : ""}: resumen ejecutivo, ranking de intervención por sala, plan de acción por supervisor, venta perdida y seguimiento de compromisos. Semana ${sem}.</p>
     ${armadas.map(resumenZona).join("")}
     <p style="color:#6b7280;font-size:12px">Rojo = fuera de meta. El detalle por supervisor, las salas foco y la venta perdida por SKU están en el PDF.</p></div>`;
-  const asunto = `${armadas.length === 1 ? armadas[0].zona : "Zonas"} · Salas foco por supervisor · Semana ${sem}`;
+  const asunto = `${armadas.length === 1 ? armadas[0].zona : "Zonas"} · Informe semanal de gestión · Semana ${sem}`;
   return { adjuntos, html, asunto };
 }
 
