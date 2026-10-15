@@ -187,15 +187,34 @@ function paginaRanking(z, extras) {
   const altas = ps.filter((p) => p.prioridad === "Alta");
   const medias = ps.filter((p) => p.prioridad === "Media");
   const mostrar = [...altas, ...medias.slice(0, Math.max(0, 28 - altas.length))];
-  const supNombre = (s) => z.supervisores.find((g) => g.salas.some((x) => x.sala_id === s.sala_id))?.nombre ?? "–";
   const resultado = (p) => p.tipo === "venta_perdida" ? "—" : `${pct(p.valor)} / ${pct(p.meta, 0)}`;
+
+  // Por supervisor; dentro de cada uno, por sala (primero las de más
+  // problemas altos) y, en cada sala, lo de prioridad alta primero.
+  const elegidos = new Set(mostrar);
+  const grupos = z.supervisores.map((sup) => {
+    const ids = new Set(sup.salas.map((s) => s.sala_id));
+    const filas = ps.filter((p) => elegidos.has(p) && ids.has(p.sala.sala_id));
+    const porSala = new Map();
+    for (const p of filas) {
+      if (!porSala.has(p.sala.sala_id)) porSala.set(p.sala.sala_id, []);
+      porSala.get(p.sala.sala_id).push(p);
+    }
+    const altasDe = (l) => l.filter((p) => p.prioridad === "Alta").length;
+    const salas = [...porSala.values()]
+      .map((l) => l.sort((a, b) => (a.prioridad === "Alta" ? 0 : 1) - (b.prioridad === "Alta" ? 0 : 1)))
+      .sort((a, b) => altasDe(b) - altasDe(a) || b.length - a.length || a[0].sala.nombre.localeCompare(b[0].sala.nombre, "es"));
+    return { sup, salas, altas: filas.filter((p) => p.prioridad === "Alta").length, n: filas.length };
+  }).filter((g) => g.n);
+
   return `<section class="pag">
-    ${cab(`${esc(z.zona)} · Ranking de intervención por sala`, "Dónde actuar primero", `${altas.length} problemas de prioridad alta<br>${medias.length} de prioridad media`)}
+    ${cab(`${esc(z.zona)} · Ranking de intervención por sala`, "Dónde actuar primero, por supervisor", `${altas.length} problemas de prioridad alta<br>${medias.length} de prioridad media`)}
     <table class="compacta">
-      <tr><th>Prioridad</th><th class="l">Supervisor</th><th class="l">Sala</th><th class="l">Problema</th><th>Resultado / meta</th><th class="r">Monto</th><th>Persiste</th><th class="l">Acción inicial</th></tr>
-      ${mostrar.map((p) => `<tr><td>${prioTag(p.prioridad)}</td><td class="l">${esc(supNombre(p.sala))}</td><td class="l b">${esc(p.sala.nombre)}</td>
-        <td class="l">${esc(p.detalle)}</td><td>${resultado(p)}</td><td class="r">${p.tipo === "venta_perdida" ? clp(p.valor) : "—"}</td>
-        <td>${p.persistente ? "Sí" : "–"}</td><td class="l">${esc(p.corto)}</td></tr>`).join("")}
+      <tr><th class="l">Sala</th><th>Prioridad</th><th class="l">Problema</th><th>Resultado / meta</th><th class="r">Monto</th><th>Persiste</th><th class="l">Acción inicial</th></tr>
+      ${grupos.map((g) => `<tr class="grupo"><td colspan="7">${esc(g.sup.nombre)} · ${g.altas} alta${g.altas === 1 ? "" : "s"}${g.n > g.altas ? ` · ${g.n - g.altas} media${g.n - g.altas === 1 ? "" : "s"}` : ""}</td></tr>
+        ${g.salas.map((l) => l.map((p, i) => `<tr>${i === 0 ? `<td class="l b" rowspan="${l.length}">${esc(p.sala.nombre)}</td>` : ""}<td>${prioTag(p.prioridad)}</td>
+          <td class="l">${esc(p.detalle)}</td><td>${resultado(p)}</td><td class="r">${p.tipo === "venta_perdida" ? clp(p.valor) : "—"}</td>
+          <td>${p.persistente ? "Sí" : "–"}</td><td class="l">${esc(p.corto)}</td></tr>`).join("")).join("")}`).join("")}
     </table>
     ${medias.length + altas.length > mostrar.length ? `<p class="nota">Y ${altas.length + medias.length - mostrar.length} problemas más de prioridad media: están en las fichas de cada supervisor y en la matriz de compromisos.</p>` : ""}
     <div class="criterio">${tag("prop")}<b>Criterio de prioridad (propuesto, no viene de la medición).</b> Se clasifica cada tipo de problema por separado, sin sumar indicadores distintos.
@@ -203,7 +222,7 @@ function paginaRanking(z, extras) {
       <b>Presentismo:</b> alta si lleva 3 semanas bajo 80%; media si la semana quedó bajo meta con 8 h o más faltantes.
       <b>Venta perdida:</b> alta si la sala reporta $50.000 o más, o algún SKU lleva 7 días o más sin stock; media si reporta $15.000 o más o algún SKU lleva 7 días o más sin venta.
       <b>Persiste:</b> RED bajo meta también la semana anterior; presentismo bajo meta en 2 de las 3 últimas semanas; venta perdida con SKU de 7 días o más sin venta.
-      El orden dentro de cada prioridad pone primero las salas con más problemas altos.</div>
+      Dentro de cada supervisor van primero las salas con más problemas altos.</div>
   </section>`;
 }
 
@@ -215,7 +234,6 @@ function bloqueProblema(p, datos) {
     <div class="k">${tag("dato")}</div><div>${esc(p.dato)}</div>
     <div class="k">${tag("hip")}</div><div>${esc(p.hipotesis)}</div>
     <div class="k">${tag("acc")}</div><div>${esc(p.accion)}</div>
-    <div class="k">Apoyo</div><div>${esc(p.apoyo)}</div>
     <div class="k">Evidencia de cierre</div><div>${esc(p.evidencia)}</div>
     <div class="k">Resultado esperado</div><div>${esc(p.esperado)}</div>
     <div class="k">Plazo ${tag("prop")}</div><div>${fechaCorta(plazo(datos, p.prioridad))}</div>
