@@ -167,6 +167,37 @@ export function leerCatalogo({ lineas, marcas }, categoria) {
     .filter((x) => x.promocion && !vistos.has(x.promocion) && vistos.add(x.promocion));
 }
 
+/**
+ * "DETALLE PORTAFOLIO IMPERDONABLE" (solo NARTD): por fila, la columna QC
+ * (x≈36) lleva un número centrado en la fila, la submétrica va al lado
+ * (x≈73, a veces en dos líneas) y CUMPLE (x≈552) es un ✔ verde o ✘ rojo a la
+ * altura del QC. La submétrica es la misma "métrica" de los 24 roles de la
+ * encuesta (mobile/src/lib/imperdonables.ts). Devuelve
+ * [{ metrica, encontrado, qc }]; si falta la marca, se usa QC = 0 → cumple.
+ */
+export function leerImperdonables({ lineas, marcas }) {
+  const ini = lineas.findIndex((l) => /DETALLE PORTAFOLIO IMPERDONABLE/i.test(l.texto));
+  if (ini < 0) return [];
+  let fin = lineas.findIndex((l, i) => i > ini && /^GLOSARIO|^RESUMEN CATEGORIAS|^DETALLE (DE )?QUIEBRES/i.test(l.texto));
+  if (fin < 0) fin = lineas.length;
+  const seccion = lineas.slice(ini + 1, fin);
+  const filas = seccion.filter((l) => l.x < 60 && /^\d+$/.test(l.texto));
+  return filas.map((qc) => {
+    const metrica = seccion
+      .filter((l) => l.pagina === qc.pagina && l.x >= 60 && l.x < 130 && Math.abs(l.y - qc.y) <= 15)
+      .sort((a, b) => b.y - a.y)
+      .map((l) => l.texto)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const marca = marcas
+      .filter((m) => m.pagina === qc.pagina && m.x > 450 && Math.abs(m.yCentro - (qc.y + 4)) < 14)
+      .sort((a, b) => Math.abs(a.yCentro - qc.y) - Math.abs(b.yCentro - qc.y))[0];
+    const n = Number(qc.texto);
+    return { metrica, encontrado: marca ? marca.color === "verde" : n === 0, qc: n };
+  }).filter((x) => x.metrica && !/^SUBMETRICA$/i.test(x.metrica));
+}
+
 function leerDatosPdf(lineas) {
   const todo = lineas.map((l) => l.texto).join("\n");
   const med = todo.match(/Hora medici\S*n\s*:\s*\n?(\d{4}-\d{2}-\d{2})\s*\((\d{2}:\d{2})\)/i);
@@ -177,6 +208,44 @@ function leerDatosPdf(lineas) {
     folio: fv ? Number(fv[1]) : null,
     visita: fv ? Number(fv[2]) : null,
   };
+}
+
+/**
+ * Alarmas NARTD ya registradas que todavía no tienen sus imperdonables (las
+ * de antes de que se leyera esa sección): se buscan por Message-ID en la
+ * bandeja y en la papelera (Gmail las guarda 30 días) y se completan. Usa la
+ * conexión IMAP ya abierta; la bandeja queda bloqueada por el llamador, así
+ * que la papelera se abre aparte y al final se vuelve a INBOX.
+ */
+async function completarImperdonables(sb, imap) {
+  const { data, error } = await sb.from("alarmas_b2b").select("message_id")
+    .eq("categoria", "NARTD").eq("imperdonables", "[]")
+    .gte("medido_at", new Date(Date.now() - 30 * 86400000).toISOString());
+  if (error) throw new Error(`alarmas_b2b: ${error.message}`);
+  if (!data.length) return 0;
+  const faltan = new Set(data.map((r) => r.message_id));
+  let n = 0;
+  const papelera = (await imap.list()).find((b) => b.specialUse === "\\Trash")?.path;
+  for (const carpeta of ["INBOX", papelera].filter(Boolean)) {
+    if (!faltan.size) break;
+    await imap.mailboxOpen(carpeta, { readOnly: true });
+    for (const mid of [...faltan]) {
+      const uids = await imap.search({ header: { "message-id": mid } }, { uid: true });
+      if (!uids.length) continue;
+      const msg = await imap.fetchOne(String(uids[0]), { source: true }, { uid: true });
+      const correo = await simpleParser(msg.source);
+      const pdf = correo.attachments.find((a) => a.contentType === "application/pdf" && /ALARMA/i.test(a.filename ?? ""));
+      if (!pdf) continue;
+      const imperdonables = leerImperdonables(await leerPdf(pdf.content));
+      const { error: e2 } = await sb.rpc("alarma_registrar_imperdonables", { p_message_id: mid, p_imperdonables: imperdonables });
+      if (e2) throw new Error(`alarma_registrar_imperdonables: ${e2.message}`);
+      faltan.delete(mid);
+      n++;
+      console.log(`imperdonables ${imperdonables.filter((x) => x.encontrado).length}/${imperdonables.length} completados · ${correo.subject}`);
+    }
+  }
+  await imap.mailboxOpen("INBOX");
+  return n;
 }
 
 /** Lee las alarmas de los últimos `dias` días y carga las que falten. */
@@ -190,11 +259,10 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
   try {
     const desde = new Date(Date.now() - dias * 86400000);
     const uids = await imap.search({ subject: "ALARMA B2B", since: desde }, { uid: true });
-    if (!uids.length) return resumen;
 
     // Message-ID de cada correo, para saltar los ya cargados sin bajar el PDF.
     const ids = new Map();
-    for await (const m of imap.fetch(uids, { envelope: true }, { uid: true })) ids.set(m.uid, m.envelope.messageId);
+    for await (const m of uids.length ? imap.fetch(uids, { envelope: true }, { uid: true }) : []) ids.set(m.uid, m.envelope.messageId);
     const hechos = new Set();
     const lista = [...ids.values()].filter(Boolean);
     for (let i = 0; i < lista.length; i += 200) {
@@ -214,12 +282,13 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
       const correo = await simpleParser(msg.source);
       const asunto = leerAsunto(correo.subject);
       const pdf = correo.attachments.find((a) => a.contentType === "application/pdf" && /ALARMA/i.test(a.filename ?? ""));
-      let promociones = [], datos = { medidoAt: null, folio: null, visita: null };
+      let promociones = [], imperdonables = [], datos = { medidoAt: null, folio: null, visita: null };
       let legible = !!(asunto && pdf);
       if (asunto && pdf) {
         try {
           const leido = await leerPdf(pdf.content);
           promociones = leerCatalogo(leido, asunto.categoria);
+          imperdonables = leerImperdonables(leido);
           datos = leerDatosPdf(leido.lineas);
         } catch (e) {
           legible = false;
@@ -233,6 +302,7 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
         p_sala_asunto: asunto?.sala ?? null, p_nota_red: asunto?.notaRed ?? null,
         p_medido_at: datos.medidoAt ?? correo.date?.toISOString() ?? new Date().toISOString(),
         p_detalle: promociones,
+        p_imperdonables: imperdonables,
       });
       if (error) throw new Error(`catalogo_cargar_alarma: ${error.message}`);
       if (legible) aPapelera.push(msg.uid);
@@ -240,7 +310,8 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
       resumen.estados[estado] = (resumen.estados[estado] ?? 0) + 1;
       const si = promociones.filter((x) => x.encontrado === true).length;
       const no = promociones.filter((x) => x.encontrado === false).length;
-      console.log(`${estado.padEnd(13)} ${String(promociones.length).padStart(3)} promos (encontradas ${si}, no ${no}) · ${correo.subject}`);
+      const impNo = imperdonables.filter((x) => !x.encontrado).length;
+      console.log(`${estado.padEnd(13)} ${String(promociones.length).padStart(3)} promos (encontradas ${si}, no ${no})${imperdonables.length ? ` · imperdonables ${imperdonables.length - impNo}/${imperdonables.length}` : ""} · ${correo.subject}`);
     }
 
     if (aPapelera.length) {
@@ -249,6 +320,7 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
       await imap.messageMove(aPapelera, papelera.path, { uid: true });
       resumen.aPapelera = aPapelera.length;
     }
+    resumen.imperdonablesCompletados = await completarImperdonables(sb, imap);
     return resumen;
   } finally {
     lock.release();

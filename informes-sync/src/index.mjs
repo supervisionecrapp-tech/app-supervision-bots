@@ -102,7 +102,7 @@ const modos = {
 
   async alarmas() {
     const r = await cargarAlarmas(supabase(), { dias: Number(arg1) || 14 });
-    console.log(`Alarmas: ${r.revisadas} en el correo, ${r.nuevas} nuevas cargadas, ${r.aPapelera ?? 0} a la papelera`, JSON.stringify(r.estados));
+    console.log(`Alarmas: ${r.revisadas} en el correo, ${r.nuevas} nuevas cargadas, ${r.aPapelera ?? 0} a la papelera, ${r.imperdonablesCompletados ?? 0} con imperdonables completados`, JSON.stringify(r.estados));
   },
 
   async envio() {
