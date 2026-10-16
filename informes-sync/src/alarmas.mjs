@@ -20,6 +20,11 @@ export function leerAsunto(asunto) {
   const m = String(asunto ?? "").match(/\[RED\s*([\d.,]+)\s*%\]\s*ALARMA B2B\s+(.+)$/i);
   if (!m) return null;
   const partes = m[2].split("|").map((s) => s.trim());
+  // A veces viene sin el separador entre proveedor y código
+  // ("EMBONOR 402|SMU|UNIM - TALCA, 5 NORTE"): se separa por el nombre del
+  // proveedor conocido.
+  const pegado = Object.keys(PROVEEDOR_CATEGORIA).find((p) => partes[0].toUpperCase().startsWith(`${p} `));
+  if (pegado && !PROVEEDOR_CATEGORIA[partes[0].toUpperCase()]) partes.splice(0, 1, pegado, partes[0].slice(pegado.length).trim());
   const proveedor = partes[0].toUpperCase();
   // Con código: proveedor | local | holding | sala. Sin código (salas que no
   // son nuestras) viene solo proveedor | sala.
