@@ -13,7 +13,8 @@ import { simpleParser } from "mailparser";
 import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { REMITENTE } from "./correo.mjs";
 
-const PROVEEDOR_CATEGORIA = { EMBONOR: "NARTD", "AB INBEV": "ABI", "VIÑA SANTA RITA": "VSR", "VINA SANTA RITA": "VSR" };
+// A veces el asunto trae la categoría en vez del proveedor ("ALARMA B2B VSR | …").
+const PROVEEDOR_CATEGORIA = { EMBONOR: "NARTD", NARTD: "NARTD", "AB INBEV": "ABI", ABI: "ABI", "VIÑA SANTA RITA": "VSR", "VINA SANTA RITA": "VSR", VSR: "VSR" };
 
 /** "RV: [RED 56%] ALARMA B2B EMBONOR | 635 | WALMART | LIDER MALL ARICA" */
 export function leerAsunto(asunto) {
