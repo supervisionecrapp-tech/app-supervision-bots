@@ -466,3 +466,65 @@ export async function volcarResumenAlarmas() {
     await imap.logout();
   }
 }
+
+/**
+ * Pase sobre alarmas anteriores: para cada sala y categoría toma SOLO la
+ * última alarma (la vigente) que no tiene sus % registrados, la busca en la
+ * bandeja o la papelera (Gmail guarda 30 días), lee el RESUMEN RED y lo
+ * registra. Abre las revisiones correspondientes SIN avisar a los supervisores.
+ * Se corre con `npm run start -- alarmas completar`.
+ */
+export async function completarResumenAlarmas(sb) {
+  const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s+/g, "");
+  if (!pass) throw new Error("Falta GMAIL_APP_PASSWORD");
+  const { data, error } = await sb.from("alarmas_b2b").select("id, message_id, sala_id, categoria, medido_at, asunto, resumen")
+    .not("sala_id", "is", null).gte("medido_at", new Date(Date.now() - 30 * 86400000).toISOString())
+    .order("medido_at", { ascending: false });
+  if (error) throw new Error(`alarmas_b2b: ${error.message}`);
+  const vistas = new Set();
+  const faltan = [];
+  for (const a of data) {
+    const clave = `${a.sala_id}|${a.categoria}`;
+    if (vistas.has(clave)) continue;
+    vistas.add(clave); // la primera de la lista es la última medición de esa sala y categoría
+    if (!a.resumen?.length) faltan.push(a);
+  }
+  console.log(`Completar resumen: ${faltan.length} alarmas vigentes sin % de ${vistas.size} salas/categorías`);
+  if (!faltan.length) return { completadas: 0, revisiones: 0 };
+
+  const imap = new ImapFlow({ host: "imap.gmail.com", port: 993, secure: true, auth: { user: REMITENTE, pass }, logger: false });
+  await imap.connect();
+  let completadas = 0, revisiones = 0, sinCorreo = 0;
+  try {
+    const papelera = (await imap.list()).find((b) => b.specialUse === "\Trash")?.path;
+    const pendientes = new Map(faltan.map((a) => [a.message_id, a]));
+    for (const carpeta of ["INBOX", papelera].filter(Boolean)) {
+      if (!pendientes.size) break;
+      const lock = await imap.getMailboxLock(carpeta);
+      try {
+        for (const [mid, a] of [...pendientes]) {
+          const uids = await imap.search({ header: { "message-id": mid } }, { uid: true });
+          if (!uids.length) continue;
+          const msg = await imap.fetchOne(String(uids[0]), { source: true }, { uid: true });
+          const correo = await simpleParser(msg.source);
+          const pdf = correo.attachments.find((x) => x.contentType === "application/pdf" && /ALARMA/i.test(x.filename ?? ""));
+          pendientes.delete(mid);
+          if (!pdf) continue;
+          const resumenRed = leerResumenRed(await leerPdf(pdf.content));
+          const { data: n, error: e2 } = await sb.rpc("alarma_registrar_resumen", { p_message_id: mid, p_resumen: resumenRed, p_notificar: false });
+          if (e2) throw new Error(`alarma_registrar_resumen: ${e2.message}`);
+          completadas++;
+          revisiones += n ?? 0;
+          console.log(`${String(n ?? 0).padStart(2)} revisiones · ${resumenRed.length} indicadores · ${a.asunto}`);
+        }
+      } finally {
+        lock.release();
+      }
+    }
+    sinCorreo = pendientes.size;
+  } finally {
+    await imap.logout();
+  }
+  console.log(`Completar resumen: ${completadas} leídas, ${revisiones} revisiones nuevas, ${sinCorreo} sin correo en Gmail (ya borrado)`);
+  return { completadas, revisiones, sinCorreo };
+}
