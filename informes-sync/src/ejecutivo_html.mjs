@@ -8,7 +8,7 @@
 // Mismos datos y reglas que el informe detallado (gestion.mjs). Los topes de
 // filas mantienen el largo; index.mjs verifica que el PDF no pase de 3 páginas.
 import { pct, clp, esc, nf, pts, perdidasSala, diaMes, masDias, CSS, RED, PRES, CORTO, celda } from "./salas_foco.mjs";
-import { GUIA_COMPONENTE, plazo, brechaTxt, fechaCorta, lista, pp, causaLabelCorta, guiaCausa } from "./gestion.mjs";
+import { GUIA_COMPONENTE, brechaTxt, fechaCorta, lista, pp, causaLabelCorta, guiaCausa } from "./gestion.mjs";
 
 const CSS_EJEC = `
   body { font-size: 10px; line-height: 1.4; }
@@ -86,7 +86,6 @@ function pagina1(datos, z, extras) {
   // Prioridades operativas: las dos mayores oportunidades contra meta (por puntos
   // porcentuales) y la venta perdida. Cada una dice la situación, qué se hace y en
   // qué orden, dónde, quién, qué resultado se espera y con qué se verifica.
-  const fecha = fechaCorta(plazo(datos, "Alta"));
   const resp = (salas) => [...new Set(salas.map((s) => supDe(z, s.sala_id)))].map(ap).join(", ");
   const supMayor = (key) => [...z.supervisores].filter((g) => g.id !== "sin" && (g.aporte[key] ?? 0) > 0.02).sort((x, y) => y.aporte[key] - x.aporte[key])[0];
   const cand = [];
@@ -158,7 +157,7 @@ function pagina1(datos, z, extras) {
   const cards = prioridades.map((p, i) => `<div class="po"><div class="ph"><span class="n">${i + 1}</span>${p.titulo}</div><div class="pg">
       <span class="k">Situación</span><span>${p.situacion}</span>
       <span class="k">Dónde</span><span>${p.donde}</span>
-      <span class="k">Responsable · plazo</span><span>${p.resp} · ${fecha}</span>
+      <span class="k">Responsable</span><span>${p.resp}</span>
       <span class="k">Resultado esperado</span><span>${p.esperado}</span>
       <span class="k">Se verifica con</span><span>${esc(p.verif)}</span></div></div>`).join("");
 
@@ -169,7 +168,7 @@ function pagina1(datos, z, extras) {
     <p class="nota">Verde: en meta · rojo: con oportunidad. Presentismo WM sin Acuenta y SMU sin S10/Super 10, horas topadas al objetivo diario.</p>
     <h2>Prioridades operativas</h2>
     ${cards}
-    <p class="nota">Orden: primero las dos mayores oportunidades contra meta (en puntos porcentuales) y luego la venta perdida. Responsables y plazos son propuestos por el informe. El detalle por sala está en las páginas siguientes.</p>
+    <p class="nota">Orden: primero las dos mayores oportunidades contra meta (en puntos porcentuales) y luego la venta perdida. Los responsables son propuestos por el informe. El detalle por sala está en las páginas siguientes.</p>
   </section>`;
 }
 
