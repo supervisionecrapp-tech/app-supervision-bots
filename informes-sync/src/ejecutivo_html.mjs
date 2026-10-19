@@ -1,11 +1,10 @@
-// Informe semanal EJECUTIVO por zona: 4 páginas para gerentes y subgerentes.
+// Informe semanal EJECUTIVO por zona: 3 páginas para gerentes y subgerentes.
 // Lo que no está en meta se presenta como oportunidad y se trabaja con un plan
 // de trabajo; el informe no le pide nada a gerencia.
 //   Pág. 1  Indicadores contra meta, comparativa general por supervisor,
 //           lectura de la semana y plan de trabajo.
 //   Pág. 2  Salas con oportunidad, por indicador.
-//   Pág. 3  Ranking de intervención por sala.
-//   Pág. 4  Venta perdida NARTD por supervisor y sala, con los 5 SKU mayores.
+//   Pág. 3  Venta perdida NARTD por supervisor y sala, con los 5 SKU mayores.
 // Mismos datos y reglas que el informe detallado (gestion.mjs). Los topes de
 // filas mantienen el largo; index.mjs verifica que el PDF no pase de 3 páginas.
 import { pct, clp, esc, nf, pts, perdidasSala, diaMes, masDias, CSS, RED, PRES, CORTO, celda } from "./salas_foco.mjs";
@@ -83,7 +82,7 @@ function pagina1(datos, z, extras) {
   };
   const comparativa = `<table class="c"><tr><th class="l"></th>${RED.map((c) => `<th>${c.label}</th>`).join("")}${PRES.map((p) => `<th>${p.label.replace("Presentismo ", "Pres. ")}</th>`).join("")}<th class="r">Vta. perdida NARTD</th></tr>
     ${filaComp(`Total ${z.zona}`, w, z.cadem.total, "tot")}
-    ${z.supervisores.map((s) => filaComp(s.nombre, s.ind[2], s.cadem.total)).join("")}</table>`;
+    ${z.supervisores.filter((s) => s.id !== "sin" || s.cadem.total).map((s) => filaComp(s.nombre, s.ind[2], s.cadem.total)).join("")}</table>`;
 
   // Prioridades operativas: las dos mayores oportunidades contra meta (por puntos
   // porcentuales). Cada una dice la situación, qué se hace y en
@@ -201,46 +200,16 @@ function pagina2(datos, z, extras) {
 
 // ---------------------------------------------------------------- página 3
 
-function pagina3(datos, z, extras) {
-  const { sem: sm } = z;
-  const ps = extras.problemas;
-
-  // Ranking: sala por sala con su situación en cada indicador. Orden: más
-  // oportunidades prioritarias primero; luego más oportunidades en total.
-  const porSala = new Map();
-  for (const p of ps.filter((q) => q.tipo !== "venta_perdida")) {
-    const x = porSala.get(p.sala.sala_id) ?? { sala: p.sala, ps: [] };
-    x.ps.push(p); porSala.set(p.sala.sala_id, x);
-  }
-  const altas = (x) => x.ps.filter((p) => p.prioridad === "Alta").length;
-  const ranking = [...porSala.values()].sort((a, b) => altas(b) - altas(a) || b.ps.length - a.ps.length || a.sala.nombre.localeCompare(b.sala.nombre, "es"));
-  const N = 18;
-  const porPrio = (l) => [...l].sort((p, q) => (p.prioridad === "Alta" ? 0 : 1) - (q.prioridad === "Alta" ? 0 : 1) || q.orden - p.orden);
-  const celdaInd = (x, tipo, fmt) => {
-    const l = porPrio(x.ps.filter((p) => p.tipo === tipo));
-    if (!l.length) return `<td class="na">–</td>`;
-    return `<td class="${l[0].prioridad === "Alta" ? "bad" : "warn"}">${l.map(fmt).join("<br>")}</td>`;
-  };
-  const filas = ranking.slice(0, N).map((x, i) => `<tr><td class="b">${i + 1}</td><td class="l b">${esc(x.sala.nombre)}</td><td class="l">${ap(supDe(z, x.sala.sala_id))}</td>
-    ${celdaInd(x, "red", (p) => `${p.cat} ${pct(p.valor, 0)}`)}${celdaInd(x, "presentismo", (p) => pct(p.valor, 0))}
-    <td class="l">${esc([...new Set(porPrio(x.ps).map((p) => p.corto))].slice(0, 2).join("; "))}</td></tr>`).join("");
-
-  return `<section class="pag">
-    ${cab(`${esc(z.zona)} · Ranking de intervención`, "Salas ordenadas por cantidad de oportunidades prioritarias", `Semana ${sm[2]}`)}
-    <table class="c"><tr><th>#</th><th class="l">Sala</th><th class="l">Supervisor</th><th>RED</th><th>Presentismo</th><th class="l">Primer foco de trabajo</th></tr>${filas}</table>
-    <p class="nota">Rojo: oportunidad prioritaria · amarillo: oportunidad media · "–": sin oportunidad en ese indicador. Se muestran las de mayor prioridad.
-      <b>Prioridad (propuesta):</b> RED prioritaria si la categoría está bajo 75% o a 20 pp o más de la meta, media desde 10 pp. Presentismo prioritario si lleva 3 semanas bajo 80% y esta semana bajo meta, media si la semana quedó bajo meta con déficit relevante. Cada indicador se clasifica por separado.</p>
-  </section>`;
-}
-
-// ---------------------------------------------------------------- página 4
-
 /** Venta perdida NARTD por supervisor y sala, con los 5 SKU de mayor monto de cada sala. */
-function pagina4(datos, z) {
+function pagina3(datos, z) {
   const cadem = z.cadem;
+  // Una hoja: las 22 salas de mayor monto de la zona, agrupadas por supervisor.
+  const TOPE = 22;
+  const elegidas = new Set(z.supervisores.flatMap((s) => s.cadem.salas).sort((a, b) => b.total - a.total).slice(0, TOPE).map((sa) => sa.salaId));
   const sups = z.supervisores.filter((s) => s.cadem.total).sort((a, b) => b.cadem.total - a.cadem.total);
   const filas = sups.map((s) => {
-    const salas = [...s.cadem.salas].sort((a, b) => b.total - a.total);
+    const salas = s.cadem.salas.filter((sa) => elegidas.has(sa.salaId)).sort((a, b) => b.total - a.total);
+    if (!salas.length) return "";
     return `<tr class="grupo"><td colspan="3">${esc(s.nombre)}<span class="x"> · ${clp(s.cadem.total)}</span></td></tr>
       ${salas.map((sa) => {
         const top = [...sa.filas].sort((a, b) => b.vp - a.vp).slice(0, 5);
@@ -251,7 +220,7 @@ function pagina4(datos, z) {
   return `<section class="pag">
     ${cab(`${esc(z.zona)} · Venta perdida NARTD`, "Por supervisor y sala, con los 5 SKU de mayor monto de cada sala", `${clp(cadem.total)} reportados<br>Semana ${z.sem[2]}`)}
     ${cadem.total ? `<table class="c vp"><tr><th class="l">Sala</th><th class="r">Venta perdida</th><th class="l">5 SKU de mayor monto</th></tr>${filas}</table>
-    <p class="nota">Venta perdida reportada por Datawalt: es lo máximo recuperable, no una meta. Supervisores ordenados de mayor a menor monto, y las salas dentro de cada uno también.</p>` : `<p class="x">No hay datos de quiebre cargados para la semana ${z.sem[2]}.</p>`}
+    <p class="nota">Venta perdida reportada por Datawalt: es lo máximo recuperable, no una meta. Supervisores y salas ordenados de mayor a menor monto; se muestran las salas de mayor monto de la zona.</p>` : `<p class="x">No hay datos de quiebre cargados para la semana ${z.sem[2]}.</p>`}
   </section>`;
 }
 
@@ -260,7 +229,7 @@ function pagina4(datos, z) {
 export function htmlEjecutivo(datos, z, extras) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(z.zona)} · Informe semanal de gestión</title>
     <style>${CSS}${CSS_EJEC}</style></head><body>
-    ${pagina1(datos, z, extras)}${pagina2(datos, z, extras)}${pagina3(datos, z, extras)}${pagina4(datos, z)}
+    ${pagina1(datos, z, extras)}${pagina2(datos, z, extras)}${pagina3(datos, z)}
   </body></html>`;
 }
 
