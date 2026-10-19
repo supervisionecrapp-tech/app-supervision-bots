@@ -13,6 +13,12 @@ import { cargarAlarmas } from "./alarmas.mjs";
 import { cargarDatos, armarZona, aPdf, pct, clp, esc, diaLargo } from "./salas_foco.mjs";
 import { cargarExtrasGestion, registrarCompromisos } from "./gestion.mjs";
 import { htmlGestion } from "./gestion_html.mjs";
+import { htmlEjecutivo, paginasPdf } from "./ejecutivo_html.mjs";
+
+// Por defecto sale el informe ejecutivo (3 páginas, para gerencia). FORMATO=detallado
+// arma el informe de gestión completo (fichas por supervisor, anexos).
+const DETALLADO = process.env.FORMATO === "detallado";
+const MAX_PAGINAS = 3;
 
 const [modo = "prueba", arg1, arg2] = process.argv.slice(2);
 
@@ -35,9 +41,13 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
     const extras = await cargarExtrasGestion(sb, datos, z);
     const n = await registrarCompromisos(sb, datos, z, extras);
     console.log(`${z.zona}: ${extras.problemas.length} problemas, ${n} compromisos registrados, ${extras.previos.length} de la semana anterior.`);
-    htmls.push(htmlGestion(datos, z, extras));
+    htmls.push(DETALLADO ? htmlGestion(datos, z, extras) : htmlEjecutivo(datos, z, extras));
   }
   const pdfs = await aPdf(htmls);
+  if (!DETALLADO) pdfs.forEach((b, i) => {
+    const n = paginasPdf(b);
+    if (n > MAX_PAGINAS) throw new Error(`El informe ejecutivo de ${armadas[i].zona} salió de ${n} páginas (máx. ${MAX_PAGINAS})`);
+  });
   const sem = datos.semanas[2].semana;
   const fecha = datos.emitido.toISOString().slice(0, 10);
 
@@ -60,9 +70,9 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
       </table>${visTxt}</div>`;
   };
   const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
-    <p>Adjunto el informe semanal de gestión${armadas.length > 1 ? ", uno por zona" : ""}: resumen ejecutivo, ranking de intervención por sala, plan de acción por supervisor, venta perdida y seguimiento de compromisos. Semana ${sem}.</p>
+    <p>Adjunto el informe semanal de gestión${armadas.length > 1 ? ", uno por zona" : ""} (semana ${sem}): indicadores contra meta, lectura de la semana, decisiones que requieren gerencia, supervisores y salas críticas, venta perdida y seguimiento de compromisos.</p>
     ${armadas.map(resumenZona).join("")}
-    <p style="color:#6b7280;font-size:12px">Rojo = fuera de meta. El detalle por supervisor, las salas foco y la venta perdida por SKU están en el PDF.</p></div>`;
+    <p style="color:#6b7280;font-size:12px">Rojo = fuera de meta. El PDF son 3 páginas; el detalle por sala y por SKU está en el portal.</p></div>`;
   const asunto = `${armadas.length === 1 ? armadas[0].zona : "Zonas"} · Informe semanal de gestión · Semana ${sem}`;
   return { adjuntos, html, asunto };
 }
