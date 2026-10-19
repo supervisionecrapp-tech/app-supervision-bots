@@ -372,7 +372,7 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
       const correo = await simpleParser(msg.source);
       const asunto = leerAsunto(correo.subject);
       const pdf = correo.attachments.find((a) => a.contentType === "application/pdf" && /ALARMA/i.test(a.filename ?? ""));
-      let promociones = [], imperdonables = [], ice = [], resumen = [], datos = { medidoAt: null, folio: null, visita: null };
+      let promociones = [], imperdonables = [], ice = [], resumenRed = [], datos = { medidoAt: null, folio: null, visita: null };
       let legible = !!(asunto && pdf);
       if (asunto && pdf) {
         try {
@@ -380,7 +380,7 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
           promociones = leerCatalogo(leido, asunto.categoria);
           imperdonables = leerImperdonables(leido);
           ice = leerIce(leido);
-          resumen = leerResumenRed(leido);
+          resumenRed = leerResumenRed(leido);
           datos = leerDatosPdf(leido.lineas);
         } catch (e) {
           legible = false;
@@ -400,8 +400,8 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
       if (error) throw new Error(`catalogo_cargar_alarma: ${error.message}`);
       // Los % por indicador van aparte y al final: al registrarlos se generan las
       // revisiones (alarma_registrar_resumen), con todo lo demás ya guardado.
-      if (resumen.length || legible) {
-        const { error: eRes } = await sb.rpc("alarma_registrar_resumen", { p_message_id: ids.get(msg.uid), p_resumen: resumen });
+      if (resumenRed.length || legible) {
+        const { error: eRes } = await sb.rpc("alarma_registrar_resumen", { p_message_id: ids.get(msg.uid), p_resumen: resumenRed });
         if (eRes) throw new Error(`alarma_registrar_resumen: ${eRes.message}`);
       }
       if (legible) aPapelera.push(msg.uid);
