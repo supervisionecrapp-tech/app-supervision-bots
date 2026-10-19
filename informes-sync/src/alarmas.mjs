@@ -496,7 +496,9 @@ export async function completarResumenAlarmas(sb) {
   await imap.connect();
   let completadas = 0, revisiones = 0, sinCorreo = 0;
   try {
-    const papelera = (await imap.list()).find((b) => b.specialUse === "\Trash")?.path;
+    const carpetas = await imap.list();
+    const papelera = (carpetas.find((b) => b.specialUse === "\Trash") ?? carpetas.find((b) => /papelera|trash|bin$/i.test(b.path)))?.path;
+    if (!papelera) console.log(`Carpetas disponibles: ${carpetas.map((b) => b.path).join(" | ")}`);
     const pendientes = new Map(faltan.map((a) => [a.message_id, a]));
     console.log(`Carpetas: INBOX, ${papelera ?? "(papelera no encontrada)"}`);
     for (const carpeta of ["INBOX", papelera].filter(Boolean)) {
