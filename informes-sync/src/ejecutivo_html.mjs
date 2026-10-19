@@ -4,7 +4,7 @@
 //   Pág. 1  Indicadores contra meta, comparativa general por supervisor,
 //           lectura de la semana y plan de trabajo.
 //   Pág. 2  Salas con oportunidad, por indicador.
-//   Pág. 3  Ranking de intervención por sala, seguimiento y datos pendientes.
+//   Pág. 3  Ranking de intervención por sala.
 // Mismos datos y reglas que el informe detallado (gestion.mjs). Los topes de
 // filas mantienen el largo; index.mjs verifica que el PDF no pase de 3 páginas.
 import { pct, clp, esc, nf, pts, perdidasSala, diaMes, masDias, CSS, RED, PRES, CORTO, celda } from "./salas_foco.mjs";
@@ -235,26 +235,11 @@ function pagina3(datos, z, extras) {
     ${celdaInd(x, "red", (p) => `${p.cat} ${pct(p.valor, 0)}`)}${celdaInd(x, "presentismo", (p) => pct(p.valor, 0))}${celdaInd(x, "venta_perdida", (p) => clp(p.valor))}
     <td class="l">${esc([...new Set(porPrio(x.ps).map((p) => p.corto))].slice(0, 2).join("; "))}</td></tr>`).join("");
 
-  // Seguimiento y datos pendientes.
-  const prev = extras.previos;
-  const mejoro = prev.filter((c) => /^Mejoró/.test(c.resultado)).length, empeoro = prev.filter((c) => /^Empeoró/.test(c.resultado)).length;
-  const seg = prev.length
-    ? `De los ${prev.length} compromisos de la semana ${sm[1]}, <b>${mejoro}</b> mejoraron su indicador, <b>${empeoro}</b> empeoraron y ${prev.length - mejoro - empeoro} se mantienen o no tienen dato esta semana.`
-    : `Este es el primer informe con compromisos registrados: su resultado se medirá en el informe de la semana ${sm[2] + 1}.`;
-  const sinRed = sinCargaRed(datos, z);
-  const pend = [];
-  if (sinRed.length) pend.push(`Sin carga RED esta semana, aunque la tenían antes: ${nombres(sinRed.map((s) => esc(s.nombre)), 4)}, entre otras. Se miden cuando llegue la carga.`);
-  pend.push("Venta perdida: el reporte solo trae las salas con quiebre medido; la causa raíz se confirma en sala.");
-
   return `<section class="pag">
     ${cab(`${esc(z.zona)} · Ranking de intervención`, "Salas ordenadas por cantidad de oportunidades prioritarias", `Semana ${sm[2]}`)}
     <table class="c"><tr><th>#</th><th class="l">Sala</th><th class="l">Supervisor</th><th>RED</th><th>Presentismo</th><th>Venta perdida</th><th class="l">Primer foco de trabajo</th></tr>${filas}</table>
     <p class="nota">Rojo: oportunidad prioritaria · amarillo: oportunidad media · "–": sin oportunidad en ese indicador. Se muestran las de mayor prioridad.
       <b>Prioridad (propuesta):</b> RED prioritaria si la categoría está bajo 75% o a 20 pp o más de la meta, media desde 10 pp. Presentismo prioritario si lleva 3 semanas bajo 80% y esta semana bajo meta, media si la semana quedó bajo meta con déficit relevante. Venta perdida prioritaria desde $50.000 o con un SKU 7 días o más sin stock, media desde $15.000. Cada indicador se clasifica por separado.</p>
-    <h2>Seguimiento de compromisos</h2>
-    <p style="margin:2px 0;font-size:10.5px">${seg}</p>
-    <h2>Datos pendientes</h2>
-    <ul class="lectura" style="font-size:9.8px">${pend.map((v) => `<li>${v}</li>`).join("")}</ul>
   </section>`;
 }
 
