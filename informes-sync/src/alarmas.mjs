@@ -502,10 +502,16 @@ export async function completarResumenAlarmas(sb) {
       if (!pendientes.size) break;
       const lock = await imap.getMailboxLock(carpeta);
       try {
+        // Se ubica cada correo por el Message-ID de su sobre (la búsqueda por
+        // cabecera no encuentra nada en la papelera de Gmail).
+        const uids = await imap.search({ subject: "ALARMA B2B", since: new Date(Date.now() - 31 * 86400000) }, { uid: true });
+        const porId = new Map();
+        for await (const m of uids.length ? imap.fetch(uids, { envelope: true }, { uid: true }) : []) porId.set(m.envelope.messageId, m.uid);
+        console.log(`${carpeta}: ${uids.length} alarmas en el correo`);
         for (const [mid, a] of [...pendientes]) {
-          const uids = await imap.search({ header: { "message-id": mid } }, { uid: true });
-          if (!uids.length) continue;
-          const msg = await imap.fetchOne(String(uids[0]), { source: true }, { uid: true });
+          const uid = porId.get(mid);
+          if (!uid) continue;
+          const msg = await imap.fetchOne(String(uid), { source: true }, { uid: true });
           const correo = await simpleParser(msg.source);
           const pdf = correo.attachments.find((x) => x.contentType === "application/pdf" && /ALARMA/i.test(x.filename ?? ""));
           pendientes.delete(mid);
