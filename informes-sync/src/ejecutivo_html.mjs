@@ -68,10 +68,9 @@ function pagina1(datos, z, extras) {
     return `<tr><td class="l b">${sem(w[k], meta)}${label}</td>${celda(w[k], meta)}<td>${pct(meta, 0)}</td><td class="${op ? "b" : ""}">${op ? `+${nf((meta - w[k]) * 100, 1)} pp` : "En meta"}</td>
       <td>${flecha(w[k], b[k])}</td><td class="l x">${serie ? `S${sm[0]} ${pct(a[k], 0)} · S${sm[1]} ${pct(b[k], 0)} · S${sm[2]} ${pct(w[k], 0)}` : ""}</td></tr>`;
   };
-  const tabla = `<table class="kpi"><tr><th class="l">Indicador</th><th>S${sm[2]}</th><th>Meta</th><th>Oportunidad</th><th>vs S${sm[1]}</th><th class="l">Últimas 3 semanas</th></tr>
-    ${RED.map((c) => filaPct(`RED ${c.label}`, c.key, metas[c.meta], false)).join("")}
-    ${PRES.map((p) => filaPct(p.label, p.key, metas.presentismo, true)).join("")}
-    <tr><td class="l b"><span class="semaforo na"></span>Venta perdida Cadem</td><td class="b">${clp(z.cadem.total)}</td><td>—</td><td>—</td><td>—</td><td class="l x">Reporte Datawalt de quiebres</td></tr></table>`;
+  const encab = `<tr><th class="l">Indicador</th><th>S${sm[2]}</th><th>Meta</th><th>Oportunidad</th><th>vs S${sm[1]}</th><th class="l">Últimas 3 semanas</th></tr>`;
+  const tablaRedKpi = `<table class="kpi">${encab}${RED.map((c) => filaPct(`RED ${c.label}`, c.key, metas[c.meta], true)).join("")}</table>`;
+  const tablaPresKpi = `<table class="kpi">${encab}${PRES.map((p) => filaPct(p.label, p.key, metas.presentismo, true)).join("")}</table>`;
 
   // Comparativa general: la zona y cada supervisor con los mismos indicadores.
   const filaComp = (nombre, ind, vp, cls = "") => {
@@ -79,12 +78,12 @@ function pagina1(datos, z, extras) {
     const pr = (k) => `<td class="${ind[k] == null ? "na" : ind[k] >= metas.presentismo ? "ok" : "bad"}">${pct(ind[k])}</td>`;
     return `<tr class="${cls}"><td class="l b">${esc(nombre)}</td>${RED.map(celdaRed).join("")}${PRES.map((p) => pr(p.key)).join("")}<td class="r">${vp ? clp(vp) : "–"}</td></tr>`;
   };
-  const comparativa = `<table class="c"><tr><th class="l"></th>${RED.map((c) => `<th>${c.label}</th>`).join("")}${PRES.map((p) => `<th>${p.label.replace("Presentismo ", "Pres. ")}</th>`).join("")}<th class="r">Venta perdida</th></tr>
+  const comparativa = `<table class="c"><tr><th class="l"></th>${RED.map((c) => `<th>${c.label}</th>`).join("")}${PRES.map((p) => `<th>${p.label.replace("Presentismo ", "Pres. ")}</th>`).join("")}<th class="r">Vta. perdida NARTD</th></tr>
     ${filaComp(`Total ${z.zona}`, w, z.cadem.total, "tot")}
     ${z.supervisores.map((s) => filaComp(s.nombre, s.ind[2], s.cadem.total)).join("")}</table>`;
 
   // Prioridades operativas: las dos mayores oportunidades contra meta (por puntos
-  // porcentuales) y la venta perdida. Cada una dice la situación, qué se hace y en
+  // porcentuales). Cada una dice la situación, qué se hace y en
   // qué orden, dónde, quién, qué resultado se espera y con qué se verifica.
   const resp = (salas) => [...new Set(salas.map((s) => supDe(z, s.sala_id)))].map(ap).join(", ");
   const supMayor = (key) => [...z.supervisores].filter((g) => g.id !== "sin" && (g.aporte[key] ?? 0) > 0.02).sort((x, y) => y.aporte[key] - x.aporte[key])[0];
@@ -133,42 +132,23 @@ function pagina1(datos, z, extras) {
       verif: "Presentismo de la semana siguiente.",
     });
   }
-  const prioridades = cand.sort((x, y) => y.orden - x.orden).slice(0, 2);
-  if (z.cadem.total) {
-    const c1 = z.cadem.causas[0];
-    const sumaCausa = new Map(); for (const r of z.cadem.filas) sumaCausa.set(r.causa, (sumaCausa.get(r.causa) ?? 0) + r.vp);
-    const g = guiaCausa([...sumaCausa].sort((x, y) => y[1] - x[1])[0][0]);
-    const sinStock = ps.flatMap((x) => x.sinStockLargo ?? []);
-    const topVp = ps.filter((x) => x.tipo === "venta_perdida").sort((x, y) => y.orden - x.orden).slice(0, 3);
-    prioridades.push({
-      titulo: `Venta perdida Cadem: ${clp(z.cadem.total)}`,
-      situacion: `${Math.round(c1.pct * 100)}% está registrada como "${c1.label.toLowerCase()}", que se recupera con reposición. El monto es lo máximo recuperable, no una meta.`,
-      hacer: [
-        g.acc,
-        sinStock.length ? `Coordinar con Embonor y la cadena el abastecimiento de ${sinStock.length} SKU con 7 días o más sin stock.` : null,
-        "Ante un quiebre de stock: validar inventario físico, comparar con el sistema, revisar pedidos y verificar la reposición en góndola.",
-      ],
-      donde: topVp.map((x) => `${esc(x.sala.nombre)} (${clp(x.valor)})`).join(", "),
-      resp: `${resp(topVp.map((x) => x.sala))}${sinStock.length ? " + Embonor" : ""}`,
-      esperado: "Los SKU con quiebre salen del reporte de la semana siguiente.",
-      verif: "Reporte Datawalt de quiebres siguiente.",
-    });
-  }
+  const prioridades = cand.sort((x, y) => y.orden - x.orden).slice(0, 3);
   const cards = prioridades.map((p, i) => `<div class="po"><div class="ph"><span class="n">${i + 1}</span>${p.titulo}</div><div class="pg">
       <span class="k">Situación</span><span>${p.situacion}</span>
       <span class="k">Dónde</span><span>${p.donde}</span>
-      <span class="k">Responsable</span><span>${p.resp}</span>
+      <span class="k">Responsable</span><span>Equipo de supervisión y analistas</span>
       <span class="k">Resultado esperado</span><span>${p.esperado}</span>
       <span class="k">Se verifica con</span><span>${esc(p.verif)}</span></div></div>`).join("");
 
   return `<section class="pag">
     ${cab(`${esc(z.zona)} · Informe semanal de gestión`, "Resumen ejecutivo y prioridades operativas", `Semana ${sm[2]} (${rango})<br>Emitido ${fechaCorta(datos.emitido)}`)}
-    <h2>Indicadores contra meta</h2>${tabla}
+    <h2>Indicadores generales · RED</h2>${tablaRedKpi}
+    <h2>Indicadores generales · Presentismo</h2>${tablaPresKpi}
     <h2>Comparativa general por supervisor</h2>${comparativa}
     <p class="nota">Verde: en meta · rojo: con oportunidad. Presentismo WM sin Acuenta y SMU sin S10/Super 10, horas topadas al objetivo diario.</p>
     <h2>Prioridades operativas</h2>
     ${cards}
-    <p class="nota">Orden: primero las dos mayores oportunidades contra meta (en puntos porcentuales) y luego la venta perdida. Los responsables son propuestos por el informe. El detalle por sala está en las páginas siguientes.</p>
+    <p class="nota">Orden: de mayor a menor oportunidad contra meta (en puntos porcentuales). El detalle por sala está en las páginas siguientes.</p>
   </section>`;
 }
 
@@ -194,17 +174,9 @@ function pagina2(datos, z, extras) {
       ${salas.slice(0, N).map((x) => `<tr><td class="l b">${esc(x.s.nombre)}</td><td class="l">${ap(supDe(z, x.s.sala_id))}</td><td class="${x.d.presSem[2] != null && x.d.presSem[2] < z.metas.presentismo ? "bad" : ""}">${pct(x.d.presSem[2], 0)}</td><td>${pct(x.d.pres3, 0)}</td><td>+${nf((z.metas.presentismo - x.d.presSem[2]) * 100, 1)} pp</td>
         <td class="l">${esc(x.h.criticos.slice(0, 3).map((c) => c.split(" ")[0]).join(", ") || "repartido")}</td></tr>`).join("")}</table></div>`;
   };
-  const vp = z.cadem.total ? `<div class="blq"><h3>Venta perdida Cadem <span class="x">· ${clp(z.cadem.total)}</span></h3>
-      <table class="c"><tr><th class="l">Sala</th><th class="l">Supervisor</th><th class="r">Venta perdida</th><th>SKU</th><th class="l">Causa principal</th><th class="l">Cómo se recupera</th></tr>
-      ${z.cadem.salas.slice(0, N).map((s) => {
-        const pc = new Map(); for (const r of s.filas) pc.set(r.causa, (pc.get(r.causa) ?? 0) + r.vp);
-        const [causa] = [...pc].sort((x, y) => y[1] - x[1])[0];
-        return `<tr><td class="l b">${esc(s.nombre)}</td><td class="l">${ap(supDe(z, s.salaId))}</td><td class="r">${clp(s.total)}</td><td>${s.n}</td><td class="l">${causaLabelCorta(causa)}</td><td class="l">${guiaCausa(causa).corto}</td></tr>`;
-      }).join("")}</table></div>` : "";
-
   return `<section class="pag">
     ${cab(`${esc(z.zona)} · Salas con oportunidad por indicador`, "Dónde está el mayor espacio de mejora en cada indicador", `Semana ${sm[2]}`)}
-    ${RED.map(tablaRed).join("")}${PRES.map(tablaPres).join("")}${vp}
+    ${RED.map(tablaRed).join("")}${PRES.map(tablaPres).join("")}
     <p class="nota">Cada tabla muestra las ${N} salas con mayor oportunidad del indicador, de mayor a menor. "Dónde sumar" es el componente RED que más puntos suma si la sala lo lleva a 100%.</p>
   </section>`;
 }
@@ -218,7 +190,7 @@ function pagina3(datos, z, extras) {
   // Ranking: sala por sala con su situación en cada indicador. Orden: más
   // oportunidades prioritarias primero; luego más oportunidades en total.
   const porSala = new Map();
-  for (const p of ps) {
+  for (const p of ps.filter((q) => q.tipo !== "venta_perdida")) {
     const x = porSala.get(p.sala.sala_id) ?? { sala: p.sala, ps: [] };
     x.ps.push(p); porSala.set(p.sala.sala_id, x);
   }
@@ -232,14 +204,14 @@ function pagina3(datos, z, extras) {
     return `<td class="${l[0].prioridad === "Alta" ? "bad" : "warn"}">${l.map(fmt).join("<br>")}</td>`;
   };
   const filas = ranking.slice(0, N).map((x, i) => `<tr><td class="b">${i + 1}</td><td class="l b">${esc(x.sala.nombre)}</td><td class="l">${ap(supDe(z, x.sala.sala_id))}</td>
-    ${celdaInd(x, "red", (p) => `${p.cat} ${pct(p.valor, 0)}`)}${celdaInd(x, "presentismo", (p) => pct(p.valor, 0))}${celdaInd(x, "venta_perdida", (p) => clp(p.valor))}
+    ${celdaInd(x, "red", (p) => `${p.cat} ${pct(p.valor, 0)}`)}${celdaInd(x, "presentismo", (p) => pct(p.valor, 0))}
     <td class="l">${esc([...new Set(porPrio(x.ps).map((p) => p.corto))].slice(0, 2).join("; "))}</td></tr>`).join("");
 
   return `<section class="pag">
     ${cab(`${esc(z.zona)} · Ranking de intervención`, "Salas ordenadas por cantidad de oportunidades prioritarias", `Semana ${sm[2]}`)}
-    <table class="c"><tr><th>#</th><th class="l">Sala</th><th class="l">Supervisor</th><th>RED</th><th>Presentismo</th><th>Venta perdida</th><th class="l">Primer foco de trabajo</th></tr>${filas}</table>
+    <table class="c"><tr><th>#</th><th class="l">Sala</th><th class="l">Supervisor</th><th>RED</th><th>Presentismo</th><th class="l">Primer foco de trabajo</th></tr>${filas}</table>
     <p class="nota">Rojo: oportunidad prioritaria · amarillo: oportunidad media · "–": sin oportunidad en ese indicador. Se muestran las de mayor prioridad.
-      <b>Prioridad (propuesta):</b> RED prioritaria si la categoría está bajo 75% o a 20 pp o más de la meta, media desde 10 pp. Presentismo prioritario si lleva 3 semanas bajo 80% y esta semana bajo meta, media si la semana quedó bajo meta con déficit relevante. Venta perdida prioritaria desde $50.000 o con un SKU 7 días o más sin stock, media desde $15.000. Cada indicador se clasifica por separado.</p>
+      <b>Prioridad (propuesta):</b> RED prioritaria si la categoría está bajo 75% o a 20 pp o más de la meta, media desde 10 pp. Presentismo prioritario si lleva 3 semanas bajo 80% y esta semana bajo meta, media si la semana quedó bajo meta con déficit relevante. Cada indicador se clasifica por separado.</p>
   </section>`;
 }
 
