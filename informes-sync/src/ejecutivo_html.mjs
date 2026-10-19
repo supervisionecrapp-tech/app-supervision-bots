@@ -132,7 +132,21 @@ function pagina1(datos, z, extras) {
       verif: "Presentismo de la semana siguiente.",
     });
   }
-  const prioridades = cand.sort((x, y) => y.orden - x.orden).slice(0, 3);
+  const prioridades = cand.sort((x, y) => y.orden - x.orden).slice(0, 2);
+  if (z.cadem.total) {
+    const c1 = z.cadem.causas[0];
+    const sumaCausa = new Map(); for (const r of z.cadem.filas) sumaCausa.set(r.causa, (sumaCausa.get(r.causa) ?? 0) + r.vp);
+    const sinStock = ps.flatMap((x) => x.sinStockLargo ?? []);
+    const topVp = ps.filter((x) => x.tipo === "venta_perdida").sort((x, y) => y.orden - x.orden).slice(0, 3);
+    prioridades.push({
+      titulo: `Venta perdida NARTD: ${clp(z.cadem.total)}`,
+      situacion: `${Math.round(c1.pct * 100)}% está registrada como "${c1.label.toLowerCase()}", que se recupera con reposición. El monto es lo máximo recuperable, no una meta.${sinStock.length ? ` Hay ${sinStock.length} SKU con 7 días o más sin stock.` : ""}`,
+      hacer: [],
+      donde: topVp.map((x) => `${esc(x.sala.nombre)} (${clp(x.valor)})`).join(", "),
+      esperado: "Los SKU con quiebre salen del reporte de la semana siguiente.",
+      verif: "Reporte Datawalt de quiebres siguiente.",
+    });
+  }
   const cards = prioridades.map((p, i) => `<div class="po"><div class="ph"><span class="n">${i + 1}</span>${p.titulo}</div><div class="pg">
       <span class="k">Situación</span><span>${p.situacion}</span>
       <span class="k">Dónde</span><span>${p.donde}</span>
@@ -148,7 +162,7 @@ function pagina1(datos, z, extras) {
     <p class="nota">Verde: en meta · rojo: con oportunidad. Presentismo WM sin Acuenta y SMU sin S10/Super 10, horas topadas al objetivo diario.</p>
     <h2>Prioridades operativas</h2>
     ${cards}
-    <p class="nota">Orden: de mayor a menor oportunidad contra meta (en puntos porcentuales). El detalle por sala está en las páginas siguientes.</p>
+    <p class="nota">Orden: primero las dos mayores oportunidades contra meta (en puntos porcentuales) y luego la venta perdida. El detalle por sala está en las páginas siguientes.</p>
   </section>`;
 }
 
