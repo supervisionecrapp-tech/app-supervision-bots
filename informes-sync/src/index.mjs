@@ -70,7 +70,7 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
       </table>${visTxt}</div>`;
   };
   const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
-    <p>Adjunto el informe semanal de gestión${armadas.length > 1 ? ", uno por zona" : ""} (semana ${sem}): indicadores contra meta, lectura de la semana, decisiones que requieren gerencia, supervisores y salas críticas, venta perdida y seguimiento de compromisos.</p>
+    <p>Adjunto el informe semanal de gestión${armadas.length > 1 ? ", uno por zona" : ""} (semana ${sem}): indicadores contra meta, comparativa general por supervisor, plan de trabajo, salas con oportunidad por indicador y ranking de intervención.</p>
     ${armadas.map(resumenZona).join("")}
     <p style="color:#6b7280;font-size:12px">Rojo = fuera de meta. El PDF son 3 páginas; el detalle por sala y por SKU está en el portal.</p></div>`;
   const asunto = `${armadas.length === 1 ? armadas[0].zona : "Zonas"} · Informe semanal de gestión · Semana ${sem}`;

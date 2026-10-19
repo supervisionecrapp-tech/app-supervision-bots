@@ -358,4 +358,4 @@ function plazo(datos, prioridad) {
   return masDias(e, 7 - dow);
 }
 
-export { problemasSala, ordenarProblemas, GUIA_CAUSA, SECUENCIA_STOCK, guiaCausa, barras, tag, prioTag, pp, brechaTxt, fechaCorta, lista, DIA, plazo, causaLabelCorta };
+export { GUIA_COMPONENTE, problemasSala, ordenarProblemas, GUIA_CAUSA, SECUENCIA_STOCK, guiaCausa, barras, tag, prioTag, pp, brechaTxt, fechaCorta, lista, DIA, plazo, causaLabelCorta };
