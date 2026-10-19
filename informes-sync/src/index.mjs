@@ -63,7 +63,7 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
     const visTxt = !incluirVisitas ? "" : vis.length
       ? `<p style="margin:6px 0 0">Visitas del ${diaLargo(datos.ayer)}: <b>${vis.length}</b> en ${new Set(vis.map((v) => v.sala)).size} salas.</p>`
       : `<p style="margin:6px 0 0;color:#6b7280">Sin visitas registradas el ${diaLargo(datos.ayer)}.</p>`;
-    return `<div style="margin:14px 0"><b style="font-size:15px">${esc(z.zona)}</b> · ${z.salasZona.length} salas · ${z.foco.length} salas foco
+    return `<div style="margin:14px 0"><b style="font-size:15px">${esc(z.zona)}</b>
       <table style="border-collapse:collapse;margin-top:4px;font-size:13px">
         <tr>${fila("NARTD", w.nartd, z.metas.red_nartd)}${fila("ABI", w.abi, z.metas.red_abi)}${fila("VSR", w.vsr, z.metas.red_vsr)}</tr>
         <tr>${fila("Pres. SMU", w.SMU, z.metas.presentismo)}${fila("Pres. WM", w.WM, z.metas.presentismo)}<td style="padding:2px 10px 2px 0">Vta. perdida Cadem</td><td style="font-weight:600">${clp(z.cadem.total)}</td></tr>

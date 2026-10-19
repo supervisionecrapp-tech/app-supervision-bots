@@ -29,7 +29,7 @@ const sem = (v, meta) => `<span class="semaforo ${v == null ? "na" : v >= meta ?
 const flecha = (v, ant) => (v == null || ant == null ? "–" : Math.abs(v - ant) < 0.0005 ? "=" : `${v > ant ? "▲" : "▼"} ${pp(v - ant)}`);
 const supDe = (z, id) => z.supervisores.find((g) => g.salas.some((x) => x.sala_id === id))?.nombre ?? "Sin supervisor";
 const ap = (n) => (n ? esc(n.split(" ").slice(-2).join(" ")) : "–");
-const horasDe = (hs) => hs.reduce((x, h) => x + Math.max(0, h.falta), 0);
+const nombres = (xs, n = 3) => xs.slice(0, n).join(", ");
 
 function sinCargaRed(datos, z) {
   const tiene = (filas, id) => { const r = filas.find((x) => x.sala_id === id); return !!r && RED.some((c) => r[`red_${c.key}`] != null); };
@@ -67,17 +67,17 @@ function pagina1(datos, z, extras) {
   const tabla = `<table class="kpi"><tr><th class="l">Indicador</th><th>S${sm[2]}</th><th>Meta</th><th>Oportunidad</th><th>vs S${sm[1]}</th><th class="l">Últimas 3 semanas</th></tr>
     ${RED.map((c) => filaPct(`RED ${c.label}`, c.key, metas[c.meta], false)).join("")}
     ${PRES.map((p) => filaPct(p.label, p.key, metas.presentismo, true)).join("")}
-    <tr><td class="l b"><span class="semaforo na"></span>Venta perdida Cadem</td><td class="b">${clp(z.cadem.total)}</td><td>—</td><td>—</td><td>—</td><td class="l x">${z.cadem.salas.length} de ${z.salasZona.length} salas con quiebre medido</td></tr></table>`;
+    <tr><td class="l b"><span class="semaforo na"></span>Venta perdida Cadem</td><td class="b">${clp(z.cadem.total)}</td><td>—</td><td>—</td><td>—</td><td class="l x">Reporte Datawalt de quiebres</td></tr></table>`;
 
   // Comparativa general: la zona y cada supervisor con los mismos indicadores.
-  const filaComp = (nombre, ind, nSalas, horas, vp, focos, cls = "") => {
+  const filaComp = (nombre, ind, vp, cls = "") => {
     const celdaRed = (c) => `<td class="${ind[c.key] == null ? "na" : ind[c.key] >= metas[c.meta] ? "ok" : "bad"}">${pct(ind[c.key])}</td>`;
     const pr = (k) => `<td class="${ind[k] == null ? "na" : ind[k] >= metas.presentismo ? "ok" : "bad"}">${pct(ind[k])}</td>`;
-    return `<tr class="${cls}"><td class="l b">${esc(nombre)}</td><td>${nSalas}</td>${RED.map(celdaRed).join("")}${PRES.map((p) => pr(p.key)).join("")}<td>${horas >= 0.5 ? `${nf(horas, 0)} h` : "–"}</td><td class="r">${vp ? clp(vp) : "–"}</td><td>${focos}</td></tr>`;
+    return `<tr class="${cls}"><td class="l b">${esc(nombre)}</td>${RED.map(celdaRed).join("")}${PRES.map((p) => pr(p.key)).join("")}<td class="r">${vp ? clp(vp) : "–"}</td></tr>`;
   };
-  const comparativa = `<table class="c"><tr><th class="l"></th><th>Salas</th>${RED.map((c) => `<th>${c.label}</th>`).join("")}${PRES.map((p) => `<th>${p.label.replace("Presentismo ", "Pres. ")}</th>`).join("")}<th>Horas por cubrir</th><th class="r">Venta perdida</th><th>Salas foco</th></tr>
-    ${filaComp(`Total ${z.zona}`, w, z.salasZona.length, horasDe(z.horas), z.cadem.total, z.foco.length, "tot")}
-    ${z.supervisores.map((s) => filaComp(s.nombre, s.ind[2], s.salas.length, horasDe(s.horas), s.cadem.total, s.foco.length)).join("")}</table>`;
+  const comparativa = `<table class="c"><tr><th class="l"></th>${RED.map((c) => `<th>${c.label}</th>`).join("")}${PRES.map((p) => `<th>${p.label.replace("Presentismo ", "Pres. ")}</th>`).join("")}<th class="r">Venta perdida</th></tr>
+    ${filaComp(`Total ${z.zona}`, w, z.cadem.total, "tot")}
+    ${z.supervisores.map((s) => filaComp(s.nombre, s.ind[2], s.cadem.total)).join("")}</table>`;
 
   // Lectura de la semana: oportunidades medidas.
   const lectura = [];
@@ -90,9 +90,8 @@ function pagina1(datos, z, extras) {
   for (const p of PRES) {
     const v = w[p.key];
     if (v == null || v >= metas.presentismo) continue;
-    const salasP = z.salasZona.filter((s) => z.porSala.get(s.sala_id).presTipo === p.key);
-    const hs = salasP.map((s) => extras.horas.get(s.sala_id)).filter(Boolean);
-    lectura.push(`<b>${p.label} ${pct(v)}:</b> hay ${nf(horasDe(hs), 0)} h por cubrir en ${hs.filter((h) => h.falta >= 0.5).length} salas.`);
+    const peor = [...z.supervisores].filter((g) => g.ind[2][p.key] != null).sort((x, y) => x.ind[2][p.key] - y.ind[2][p.key])[0];
+    lectura.push(`<b>${p.label} ${pct(v)}:</b> ${nf((metas.presentismo - v) * 100, 1)} pp bajo la meta${v < b[p.key] ? `, ${nf((b[p.key] - v) * 100, 1)} pp menos que la semana anterior` : ""}.${peor && peor.ind[2][p.key] < metas.presentismo ? ` La mayor oportunidad está en ${esc(peor.nombre)} (${pct(peor.ind[2][p.key])}).` : ""}`);
   }
   if (z.cadem.total) {
     const c1 = z.cadem.causas[0];
@@ -109,18 +108,18 @@ function pagina1(datos, z, extras) {
     if (!foco.length) continue;
     const top = z.brechas[c.key]?.componentes?.[0];
     const guia = top ? GUIA_COMPONENTE[top.label] : null;
-    plan.push({ ind: `RED ${c.label}`, trabajo: `${guia?.corto ?? "Revisar medición"} en ${lista(foco.map((x) => esc(x.s.nombre)), 3)}.`, resp: resp(foco.map((x) => x.s)), verif: "Componente sobre 90% en la medición RED siguiente." });
+    plan.push({ ind: `RED ${c.label}`, trabajo: `${guia?.corto ?? "Revisar medición"} en ${nombres(foco.map((x) => esc(x.s.nombre)))}.`, resp: resp(foco.map((x) => x.s)), verif: "Componente sobre 90% en la medición RED siguiente." });
   }
   for (const p of PRES) {
     if (w[p.key] == null || w[p.key] >= metas.presentismo) continue;
-    const l = ps.filter((x) => x.tipo === "presentismo" && x.cat === p.key).sort((x, y) => y.orden - x.orden).slice(0, 4);
+    const l = ps.filter((x) => x.tipo === "presentismo" && x.cat === p.key).sort((x, y) => x.valor - y.valor).slice(0, 4);
     if (!l.length) continue;
-    plan.push({ ind: p.label, trabajo: `Revisar marcas y cubrir turnos en ${lista(l.map((x) => `${esc(x.sala.nombre)} (${nf(x.orden, 0)} h)`), 3)}.`, resp: `${resp(l.map((x) => x.sala))} + coordinación de dotación`, verif: "Horas cumplidas ≥ objetivo la semana siguiente." });
+    plan.push({ ind: p.label, trabajo: `Revisar marcas y cubrir turnos en ${nombres(l.map((x) => `${esc(x.sala.nombre)} (${pct(x.valor, 0)})`))}.`, resp: `${resp(l.map((x) => x.sala))} + coordinación de dotación`, verif: "Presentismo en meta la semana siguiente." });
   }
   if (z.cadem.total) {
     const sinStock = ps.flatMap((x) => x.sinStockLargo ?? []);
     const topVp = ps.filter((x) => x.tipo === "venta_perdida").sort((x, y) => y.orden - x.orden).slice(0, 3);
-    plan.push({ ind: "Venta perdida", trabajo: `Reponer o ajustar inventario según la causa en ${lista(topVp.map((x) => esc(x.sala.nombre)), 3)}.${sinStock.length ? ` Coordinar abastecimiento de ${sinStock.length} SKU con 7 días o más sin stock.` : ""}`,
+    plan.push({ ind: "Venta perdida", trabajo: `Reponer o ajustar inventario según la causa en ${nombres(topVp.map((x) => esc(x.sala.nombre)))}.${sinStock.length ? ` Coordinar abastecimiento de ${sinStock.length} SKU con 7 días o más sin stock.` : ""}`,
       resp: `${resp(topVp.map((x) => x.sala))}${sinStock.length ? " + Embonor" : ""}`, verif: "SKU fuera del reporte de quiebres siguiente." });
   }
 
@@ -146,21 +145,21 @@ function pagina2(datos, z, extras) {
   const tablaRed = (c) => {
     const { meta, filas } = oportunidadesRed(z, c);
     if (!filas.length) return `<div class="blq"><h3>RED ${c.label}</h3><p class="x">Todas las salas medidas están en meta.</p></div>`;
-    return `<div class="blq"><h3>RED ${c.label} <span class="x">· meta ${pct(meta, 0)} · ${filas.length} salas con oportunidad</span></h3>
+    return `<div class="blq"><h3>RED ${c.label} <span class="x">· meta ${pct(meta, 0)}</span></h3>
       <table class="c"><tr><th class="l">Sala</th><th class="l">Supervisor</th><th>Nota</th><th>Oportunidad</th><th class="l">Dónde sumar</th></tr>
       ${filas.slice(0, N).map((x) => `<tr><td class="l b">${esc(x.s.nombre)}</td><td class="l">${ap(supDe(z, x.s.sala_id))}</td><td class="bad">${pct(x.v)}</td><td>+${nf((meta - x.v) * 100, 1)} pp</td>
         <td class="l">${x.top ? `${esc(CORTO[x.top.label] ?? x.top.label)} <span class="x">(+${pts(x.top.pierde)} pts)</span>` : "–"}</td></tr>`).join("")}</table></div>`;
   };
   const tablaPres = (p) => {
     const salas = z.salasZona.filter((s) => z.porSala.get(s.sala_id).presTipo === p.key).map((s) => ({ s, h: extras.horas.get(s.sala_id), d: z.porSala.get(s.sala_id) }))
-      .filter((x) => x.h && x.h.falta >= 0.5).sort((a, b) => b.h.falta - a.h.falta);
+      .filter((x) => x.h && x.d.presSem[2] != null && x.d.presSem[2] < z.metas.presentismo).sort((a, b) => a.d.presSem[2] - b.d.presSem[2]);
     if (!salas.length) return "";
-    return `<div class="blq"><h3>${p.label} <span class="x">· meta ${pct(z.metas.presentismo, 0)} · ${salas.length} salas con horas por cubrir</span></h3>
-      <table class="c"><tr><th class="l">Sala</th><th class="l">Supervisor</th><th>Semana</th><th>3 semanas</th><th>Horas por cubrir</th><th class="l">Días críticos</th></tr>
-      ${salas.slice(0, N).map((x) => `<tr><td class="l b">${esc(x.s.nombre)}</td><td class="l">${ap(supDe(z, x.s.sala_id))}</td><td class="${x.d.presSem[2] != null && x.d.presSem[2] < z.metas.presentismo ? "bad" : ""}">${pct(x.d.presSem[2], 0)}</td><td>${pct(x.d.pres3, 0)}</td><td>${nf(x.h.falta, 0)} h</td>
+    return `<div class="blq"><h3>${p.label} <span class="x">· meta ${pct(z.metas.presentismo, 0)}</span></h3>
+      <table class="c"><tr><th class="l">Sala</th><th class="l">Supervisor</th><th>Semana</th><th>3 semanas</th><th>Oportunidad</th><th class="l">Días críticos</th></tr>
+      ${salas.slice(0, N).map((x) => `<tr><td class="l b">${esc(x.s.nombre)}</td><td class="l">${ap(supDe(z, x.s.sala_id))}</td><td class="${x.d.presSem[2] != null && x.d.presSem[2] < z.metas.presentismo ? "bad" : ""}">${pct(x.d.presSem[2], 0)}</td><td>${pct(x.d.pres3, 0)}</td><td>+${nf((z.metas.presentismo - x.d.presSem[2]) * 100, 1)} pp</td>
         <td class="l">${esc(x.h.criticos.slice(0, 3).map((c) => c.split(" ")[0]).join(", ") || "repartido")}</td></tr>`).join("")}</table></div>`;
   };
-  const vp = z.cadem.total ? `<div class="blq"><h3>Venta perdida Cadem <span class="x">· ${clp(z.cadem.total)} · ${z.cadem.salas.length} salas con quiebre medido</span></h3>
+  const vp = z.cadem.total ? `<div class="blq"><h3>Venta perdida Cadem <span class="x">· ${clp(z.cadem.total)}</span></h3>
       <table class="c"><tr><th class="l">Sala</th><th class="l">Supervisor</th><th class="r">Venta perdida</th><th>SKU</th><th class="l">Causa principal</th><th class="l">Cómo se recupera</th></tr>
       ${z.cadem.salas.slice(0, N).map((s) => {
         const pc = new Map(); for (const r of s.filas) pc.set(r.causa, (pc.get(r.causa) ?? 0) + r.vp);
@@ -197,7 +196,6 @@ function pagina3(datos, z, extras) {
     if (!l.length) return `<td class="na">–</td>`;
     return `<td class="${l[0].prioridad === "Alta" ? "bad" : "warn"}">${l.map(fmt).join("<br>")}</td>`;
   };
-  const nPrio = ranking.filter((x) => altas(x)).length;
   const filas = ranking.slice(0, N).map((x, i) => `<tr><td class="b">${i + 1}</td><td class="l b">${esc(x.sala.nombre)}</td><td class="l">${ap(supDe(z, x.sala.sala_id))}</td>
     ${celdaInd(x, "red", (p) => `${p.cat} ${pct(p.valor, 0)}`)}${celdaInd(x, "presentismo", (p) => pct(p.valor, 0))}${celdaInd(x, "venta_perdida", (p) => clp(p.valor))}
     <td class="l">${esc([...new Set(porPrio(x.ps).map((p) => p.corto))].slice(0, 2).join("; "))}</td></tr>`).join("");
@@ -210,14 +208,14 @@ function pagina3(datos, z, extras) {
     : `Este es el primer informe con compromisos registrados: su resultado se medirá en el informe de la semana ${sm[2] + 1}.`;
   const sinRed = sinCargaRed(datos, z);
   const pend = [];
-  if (sinRed.length) pend.push(`${sinRed.length} salas sin carga RED esta semana (${lista(sinRed.map((s) => esc(s.nombre)), 3)}): se miden cuando llegue la carga.`);
-  pend.push(`Venta perdida: ${z.cadem.salas.length} de ${z.salasZona.length} salas con quiebre medido; la causa raíz se confirma en sala.`);
+  if (sinRed.length) pend.push(`Sin carga RED esta semana, aunque la tenían antes: ${nombres(sinRed.map((s) => esc(s.nombre)), 4)}, entre otras. Se miden cuando llegue la carga.`);
+  pend.push("Venta perdida: el reporte solo trae las salas con quiebre medido; la causa raíz se confirma en sala.");
 
   return `<section class="pag">
-    ${cab(`${esc(z.zona)} · Ranking de intervención`, "Salas ordenadas por cantidad de oportunidades prioritarias", `Semana ${sm[2]}<br>${nPrio} salas con oportunidad prioritaria`)}
+    ${cab(`${esc(z.zona)} · Ranking de intervención`, "Salas ordenadas por cantidad de oportunidades prioritarias", `Semana ${sm[2]}`)}
     <table class="c"><tr><th>#</th><th class="l">Sala</th><th class="l">Supervisor</th><th>RED</th><th>Presentismo</th><th>Venta perdida</th><th class="l">Primer foco de trabajo</th></tr>${filas}</table>
-    <p class="nota">Rojo: oportunidad prioritaria · amarillo: oportunidad media · "–": sin oportunidad en ese indicador. Se muestran las ${Math.min(N, ranking.length)} primeras de ${ranking.length} salas.
-      <b>Prioridad (propuesta):</b> RED prioritaria si la categoría está bajo 75% o a 20 pp o más de la meta, media desde 10 pp. Presentismo prioritario si lleva 3 semanas bajo 80% y esta semana bajo meta, media si faltan 8 h o más. Venta perdida prioritaria desde $50.000 o con un SKU 7 días o más sin stock, media desde $15.000. Cada indicador se clasifica por separado.</p>
+    <p class="nota">Rojo: oportunidad prioritaria · amarillo: oportunidad media · "–": sin oportunidad en ese indicador. Se muestran las de mayor prioridad.
+      <b>Prioridad (propuesta):</b> RED prioritaria si la categoría está bajo 75% o a 20 pp o más de la meta, media desde 10 pp. Presentismo prioritario si lleva 3 semanas bajo 80% y esta semana bajo meta, media si la semana quedó bajo meta con déficit relevante. Venta perdida prioritaria desde $50.000 o con un SKU 7 días o más sin stock, media desde $15.000. Cada indicador se clasifica por separado.</p>
     <h2>Seguimiento de compromisos</h2>
     <p style="margin:2px 0;font-size:10.5px">${seg}</p>
     <h2>Datos pendientes</h2>
