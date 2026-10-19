@@ -157,7 +157,6 @@ function pagina1(datos, z, extras) {
   }
   const cards = prioridades.map((p, i) => `<div class="po"><div class="ph"><span class="n">${i + 1}</span>${p.titulo}</div><div class="pg">
       <span class="k">Situación</span><span>${p.situacion}</span>
-      <span class="k">Qué se trabaja</span><ol>${p.hacer.filter(Boolean).map((h) => `<li>${esc(h)}</li>`).join("")}</ol>
       <span class="k">Dónde</span><span>${p.donde}</span>
       <span class="k">Responsable · plazo</span><span>${p.resp} · ${fecha}</span>
       <span class="k">Resultado esperado</span><span>${p.esperado}</span>
