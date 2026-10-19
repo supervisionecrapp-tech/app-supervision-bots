@@ -389,7 +389,7 @@ export async function volcarResumenAlarmas() {
   await imap.connect();
   const vistas = new Set();
   try {
-    const buzones = ["INBOX", (await imap.list()).find((b) => b.specialUse === "\Trash")?.path].filter(Boolean);
+    const buzones = ["INBOX", (await imap.list()).find((b) => b.specialUse === "\\Trash")?.path].filter(Boolean);
     for (const buzon of buzones) {
       const lock = await imap.getMailboxLock(buzon);
       try {
