@@ -242,6 +242,50 @@ export function leerIce({ lineas }) {
   ];
 }
 
+// Indicadores de primer nivel del "RESUMEN RED" → código de regla de revisión
+// (revision_reglas). El rótulo está a la izquierda (x < 30) con su peso entre
+// paréntesis ("NSS (20%)", "CATALOGO (%)"); la NOTA es el % de la columna que
+// encabeza "NOTA", a la misma altura. EXHIBICION de NARTD es la del acuerdo
+// comercial (= exhib_pactadas del portal); la de ABI es EXHIBICION ADICIONAL.
+const RESUMEN_INDICADORES = [
+  [/^NSS\b/i, "red_nss"],
+  [/^SOVI\b/i, "red_sovi"],
+  [/^ESTRATEGIA ICE\b/i, "red_ice"],
+  [/^NSF\b/i, "red_nsf"],
+  [/^COMUNICACION\b/i, "red_pop"],
+  [/^CATALOGOS?\b/i, "red_catalogos"],
+  [/^EXHIBICION ADICIONAL\b/i, "red_exhib_adicionales"],
+  [/^EXHIBICION\b(?! ADICIONAL)/i, "red_exhib_pactadas"],
+];
+
+/**
+ * % obtenido por indicador en el "RESUMEN RED" de la alarma.
+ * Devuelve [{ codigo, nota }] con nota entre 0 y 1; un indicador que la
+ * alarma no trae simplemente no aparece.
+ */
+export function leerResumenRed({ lineas }) {
+  const ini = lineas.findIndex((l) => /^RESUMEN RED$/i.test(l.texto));
+  if (ini < 0) return [];
+  const out = [];
+  let notaX = null;
+  for (let i = ini + 1; i < lineas.length; i++) {
+    const l = lineas[i];
+    if (/^(GLOSARIO|RESUMEN CATEGORIAS|DETALLE)/i.test(l.texto)) break;
+    if (/^NOTA$/i.test(l.texto)) { notaX = l.x; continue; }
+    if (l.x >= 30 || notaX == null) continue;
+    // El rótulo a veces se parte en dos líneas ("EXHIBICION" / "ADICIONAL").
+    const sig = lineas[i + 1];
+    const rotulo = sig && sig.pagina === l.pagina && sig.x < 30 && l.y - sig.y <= 22 ? `${l.texto} ${sig.texto}` : l.texto;
+    const codigo = RESUMEN_INDICADORES.find(([re]) => re.test(rotulo))?.[1];
+    if (!codigo || out.some((o) => o.codigo === codigo)) continue;
+    const celda = lineas
+      .filter((c) => c.pagina === l.pagina && /^\d+(\.\d+)?%$/.test(c.texto) && Math.abs(c.x - notaX) <= 30 && Math.abs(c.y - l.y) <= 22)
+      .sort((a, b) => Math.abs(a.y - l.y) - Math.abs(b.y - l.y))[0];
+    if (celda) out.push({ codigo, nota: Number(celda.texto.replace("%", "")) / 100 });
+  }
+  return out;
+}
+
 function leerDatosPdf(lineas) {
   const todo = lineas.map((l) => l.texto).join("\n");
   const med = todo.match(/Hora medici\S*n\s*:\s*\n?(\d{4}-\d{2}-\d{2})\s*\((\d{2}:\d{2})\)/i);
@@ -328,7 +372,7 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
       const correo = await simpleParser(msg.source);
       const asunto = leerAsunto(correo.subject);
       const pdf = correo.attachments.find((a) => a.contentType === "application/pdf" && /ALARMA/i.test(a.filename ?? ""));
-      let promociones = [], imperdonables = [], ice = [], datos = { medidoAt: null, folio: null, visita: null };
+      let promociones = [], imperdonables = [], ice = [], resumen = [], datos = { medidoAt: null, folio: null, visita: null };
       let legible = !!(asunto && pdf);
       if (asunto && pdf) {
         try {
@@ -336,6 +380,7 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
           promociones = leerCatalogo(leido, asunto.categoria);
           imperdonables = leerImperdonables(leido);
           ice = leerIce(leido);
+          resumen = leerResumenRed(leido);
           datos = leerDatosPdf(leido.lineas);
         } catch (e) {
           legible = false;
@@ -353,6 +398,12 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
         p_ice: ice,
       });
       if (error) throw new Error(`catalogo_cargar_alarma: ${error.message}`);
+      // Los % por indicador van aparte y al final: al registrarlos se generan las
+      // revisiones (alarma_registrar_resumen), con todo lo demás ya guardado.
+      if (resumen.length || legible) {
+        const { error: eRes } = await sb.rpc("alarma_registrar_resumen", { p_message_id: ids.get(msg.uid), p_resumen: resumen });
+        if (eRes) throw new Error(`alarma_registrar_resumen: ${eRes.message}`);
+      }
       if (legible) aPapelera.push(msg.uid);
       resumen.nuevas++;
       resumen.estados[estado] = (resumen.estados[estado] ?? 0) + 1;
