@@ -15,10 +15,10 @@ import { cargarExtrasGestion, registrarCompromisos } from "./gestion.mjs";
 import { htmlGestion } from "./gestion_html.mjs";
 import { htmlEjecutivo, paginasPdf } from "./ejecutivo_html.mjs";
 
-// Por defecto sale el informe ejecutivo (3 páginas, para gerencia). FORMATO=detallado
+// Por defecto sale el informe ejecutivo (4 páginas, para gerencia). FORMATO=detallado
 // arma el informe de gestión completo (fichas por supervisor, anexos).
 const DETALLADO = process.env.FORMATO === "detallado";
-const MAX_PAGINAS = 3;
+const MAX_PAGINAS = 4;
 
 const [modo = "prueba", arg1, arg2] = process.argv.slice(2);
 
@@ -72,7 +72,7 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
   const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
     <p>Adjunto el informe semanal de gestión${armadas.length > 1 ? ", uno por zona" : ""} (semana ${sem}): indicadores contra meta, comparativa general por supervisor, plan de trabajo, salas con oportunidad por indicador y ranking de intervención.</p>
     ${armadas.map(resumenZona).join("")}
-    <p style="color:#6b7280;font-size:12px">Rojo = fuera de meta. El PDF son 3 páginas; el detalle por sala y por SKU está en el portal.</p></div>`;
+    <p style="color:#6b7280;font-size:12px">Rojo = fuera de meta. El PDF son 4 páginas; el detalle por sala y por SKU está en el portal.</p></div>`;
   const asunto = `${armadas.length === 1 ? armadas[0].zona : "Zonas"} · Informe semanal de gestión · Semana ${sem}`;
   return { adjuntos, html, asunto };
 }

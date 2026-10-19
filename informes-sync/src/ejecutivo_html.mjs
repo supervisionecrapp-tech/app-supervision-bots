@@ -1,10 +1,11 @@
-// Informe semanal EJECUTIVO por zona: 3 páginas para gerentes y subgerentes.
+// Informe semanal EJECUTIVO por zona: 4 páginas para gerentes y subgerentes.
 // Lo que no está en meta se presenta como oportunidad y se trabaja con un plan
 // de trabajo; el informe no le pide nada a gerencia.
 //   Pág. 1  Indicadores contra meta, comparativa general por supervisor,
 //           lectura de la semana y plan de trabajo.
 //   Pág. 2  Salas con oportunidad, por indicador.
 //   Pág. 3  Ranking de intervención por sala.
+//   Pág. 4  Venta perdida NARTD por supervisor y sala, con los 5 SKU mayores.
 // Mismos datos y reglas que el informe detallado (gestion.mjs). Los topes de
 // filas mantienen el largo; index.mjs verifica que el PDF no pase de 3 páginas.
 import { pct, clp, esc, nf, pts, perdidasSala, diaMes, masDias, CSS, RED, PRES, CORTO, celda } from "./salas_foco.mjs";
@@ -25,6 +26,8 @@ const CSS_EJEC = `
   .po .ph { font-weight: 700; font-size: 11px; margin-bottom: 3px; } .po .ph .n { display: inline-block; background: #b91c1c; color: #fff; border-radius: 50%; width: 16px; height: 16px; text-align: center; line-height: 16px; font-size: 9.5px; margin-right: 6px; }
   .po .pg { display: grid; grid-template-columns: 104px 1fr; gap: 1px 8px; font-size: 9.3px; line-height: 1.35; } .po .k { color: #6b7280; font-weight: 600; }
   .po ol { margin: 0; padding-left: 14px; } .po li { margin: 0; }
+  table.vp td, table.vp th { font-size: 8.8px; padding: 2px 5px; }
+  table.vp tr.grupo td { background: #1f2937; color: #fff; font-weight: 700; font-size: 9.8px; text-align: left; border: none; padding: 4px 6px; } table.vp tr.grupo .x { color: #d1d5db; }
   .blq h3 { margin: 8px 0 3px; font-size: 10.5px; } .blq .x { font-weight: 400; }
 `;
 
@@ -230,12 +233,34 @@ function pagina3(datos, z, extras) {
   </section>`;
 }
 
+// ---------------------------------------------------------------- página 4
+
+/** Venta perdida NARTD por supervisor y sala, con los 5 SKU de mayor monto de cada sala. */
+function pagina4(datos, z) {
+  const cadem = z.cadem;
+  const sups = z.supervisores.filter((s) => s.cadem.total).sort((a, b) => b.cadem.total - a.cadem.total);
+  const filas = sups.map((s) => {
+    const salas = [...s.cadem.salas].sort((a, b) => b.total - a.total);
+    return `<tr class="grupo"><td colspan="3">${esc(s.nombre)}<span class="x"> · ${clp(s.cadem.total)}</span></td></tr>
+      ${salas.map((sa) => {
+        const top = [...sa.filas].sort((a, b) => b.vp - a.vp).slice(0, 5);
+        return `<tr><td class="l b">${esc(sa.nombre)}</td><td class="r">${clp(sa.total)}</td>
+          <td class="l">${top.map((r) => `${esc(r.sku)} <span class="x">${clp(r.vp)}</span>`).join(" · ")}</td></tr>`;
+      }).join("")}`;
+  }).join("");
+  return `<section class="pag">
+    ${cab(`${esc(z.zona)} · Venta perdida NARTD`, "Por supervisor y sala, con los 5 SKU de mayor monto de cada sala", `${clp(cadem.total)} reportados<br>Semana ${z.sem[2]}`)}
+    ${cadem.total ? `<table class="c vp"><tr><th class="l">Sala</th><th class="r">Venta perdida</th><th class="l">5 SKU de mayor monto</th></tr>${filas}</table>
+    <p class="nota">Venta perdida reportada por Datawalt: es lo máximo recuperable, no una meta. Supervisores ordenados de mayor a menor monto, y las salas dentro de cada uno también.</p>` : `<p class="x">No hay datos de quiebre cargados para la semana ${z.sem[2]}.</p>`}
+  </section>`;
+}
+
 // ---------------------------------------------------------------- documento
 
 export function htmlEjecutivo(datos, z, extras) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(z.zona)} · Informe semanal de gestión</title>
     <style>${CSS}${CSS_EJEC}</style></head><body>
-    ${pagina1(datos, z, extras)}${pagina2(datos, z, extras)}${pagina3(datos, z, extras)}
+    ${pagina1(datos, z, extras)}${pagina2(datos, z, extras)}${pagina3(datos, z, extras)}${pagina4(datos, z)}
   </body></html>`;
 }
 
