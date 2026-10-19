@@ -498,6 +498,7 @@ export async function completarResumenAlarmas(sb) {
   try {
     const papelera = (await imap.list()).find((b) => b.specialUse === "\Trash")?.path;
     const pendientes = new Map(faltan.map((a) => [a.message_id, a]));
+    console.log(`Carpetas: INBOX, ${papelera ?? "(papelera no encontrada)"}`);
     for (const carpeta of ["INBOX", papelera].filter(Boolean)) {
       if (!pendientes.size) break;
       const lock = await imap.getMailboxLock(carpeta);
