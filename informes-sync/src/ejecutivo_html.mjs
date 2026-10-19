@@ -182,7 +182,7 @@ function pagina2(datos, z, extras) {
   const tablaPres = (p) => {
     const salas = z.salasZona.filter((s) => z.porSala.get(s.sala_id).presTipo === p.key).map((s) => ({ s, h: extras.horas.get(s.sala_id), d: z.porSala.get(s.sala_id) }))
       .filter((x) => x.h && x.d.presSem[2] != null && x.d.presSem[2] < z.metas.presentismo).sort((a, b) => a.d.presSem[2] - b.d.presSem[2]);
-    if (!salas.length) return "";
+    if (!salas.length) return `<div class="blq"><h3>${p.label}</h3><p class="x">Todas las salas medidas están en meta.</p></div>`;
     return `<div class="blq"><h3>${p.label} <span class="x">· meta ${pct(z.metas.presentismo, 0)}</span></h3>
       <table class="c"><tr><th class="l">Sala</th><th class="l">Supervisor</th><th>Semana</th><th>3 semanas</th><th>Oportunidad</th><th class="l">Días críticos</th></tr>
       ${salas.slice(0, N).map((x) => `<tr><td class="l b">${esc(x.s.nombre)}</td><td class="l">${ap(supDe(z, x.s.sala_id))}</td><td class="${x.d.presSem[2] != null && x.d.presSem[2] < z.metas.presentismo ? "bad" : ""}">${pct(x.d.presSem[2], 0)}</td><td>${pct(x.d.pres3, 0)}</td><td>+${nf((z.metas.presentismo - x.d.presSem[2]) * 100, 1)} pp</td>
@@ -190,7 +190,8 @@ function pagina2(datos, z, extras) {
   };
   return `<section class="pag">
     ${cab(`${esc(z.zona)} · Salas con oportunidad por indicador`, "Dónde está el mayor espacio de mejora en cada indicador", `Semana ${sm[2]}`)}
-    ${RED.map(tablaRed).join("")}${PRES.map(tablaPres).join("")}
+    <h2>RED</h2>${RED.map(tablaRed).join("")}
+    <h2>Presentismo</h2>${["WM", "SMU"].map((k) => PRES.find((p) => p.key === k)).filter(Boolean).map(tablaPres).join("")}
     <p class="nota">Cada tabla muestra las ${N} salas con mayor oportunidad del indicador, de mayor a menor. "Dónde sumar" es el componente RED que más puntos suma si la sala lo lleva a 100%.</p>
   </section>`;
 }
