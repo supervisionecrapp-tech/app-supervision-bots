@@ -9,7 +9,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { enviarCorreo, REMITENTE } from "./correo.mjs";
-import { cargarAlarmas } from "./alarmas.mjs";
+import { cargarAlarmas, volcarResumenAlarmas } from "./alarmas.mjs";
 import { cargarDatos, armarZona, aPdf, pct, clp, esc, diaLargo } from "./salas_foco.mjs";
 import { cargarExtrasGestion, registrarCompromisos } from "./gestion.mjs";
 import { htmlGestion } from "./gestion_html.mjs";
@@ -111,6 +111,7 @@ const modos = {
   },
 
   async alarmas() {
+    if (arg1 === "volcar") return volcarResumenAlarmas();
     const r = await cargarAlarmas(supabase(), { dias: Number(arg1) || 14 });
     console.log(`Alarmas: ${r.revisadas} en el correo, ${r.nuevas} nuevas cargadas, ${r.aPapelera ?? 0} a la papelera, ${r.imperdonablesCompletados ?? 0} con imperdonables completados`, JSON.stringify(r.estados));
   },

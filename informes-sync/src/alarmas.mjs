@@ -375,3 +375,43 @@ export async function cargarAlarmas(sb, { dias = 14 } = {}) {
     await imap.logout();
   }
 }
+
+/**
+ * Diagnóstico: imprime las líneas (x, y, texto) del "RESUMEN RED" del último
+ * PDF de cada categoría, para escribir/ajustar la lectura de los % por
+ * indicador sin adivinar posiciones. Busca en la bandeja y en la papelera.
+ * Se corre con `npm run start -- alarmas volcar`.
+ */
+export async function volcarResumenAlarmas() {
+  const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s+/g, "");
+  if (!pass) throw new Error("Falta GMAIL_APP_PASSWORD");
+  const imap = new ImapFlow({ host: "imap.gmail.com", port: 993, secure: true, auth: { user: REMITENTE, pass }, logger: false });
+  await imap.connect();
+  const vistas = new Set();
+  try {
+    const buzones = ["INBOX", (await imap.list()).find((b) => b.specialUse === "\Trash")?.path].filter(Boolean);
+    for (const buzon of buzones) {
+      const lock = await imap.getMailboxLock(buzon);
+      try {
+        const uids = (await imap.search({ subject: "ALARMA B2B", since: new Date(Date.now() - 30 * 86400000) }, { uid: true })).reverse();
+        for (const uid of uids) {
+          if (vistas.size >= 3) break;
+          const msg = await imap.fetchOne(uid, { source: true }, { uid: true });
+          const correo = await simpleParser(msg.source);
+          const asunto = leerAsunto(correo.subject);
+          const pdf = correo.attachments.find((a) => a.contentType === "application/pdf" && /ALARMA/i.test(a.filename ?? ""));
+          if (!asunto?.categoria || !pdf || vistas.has(asunto.categoria)) continue;
+          vistas.add(asunto.categoria);
+          const { lineas } = await leerPdf(pdf.content);
+          const ini = Math.max(0, lineas.findIndex((l) => /RESUMEN RED/i.test(l.texto)));
+          console.log(`===== ${asunto.categoria} · ${correo.subject} · RESUMEN RED desde la línea ${ini} de ${lineas.length}`);
+          for (const l of lineas.slice(ini, ini + 220)) console.log(`${l.pagina}	${l.x.toFixed(0)}	${l.y.toFixed(0)}	${l.texto}`);
+        }
+      } finally {
+        lock.release();
+      }
+    }
+  } finally {
+    await imap.logout();
+  }
+}
