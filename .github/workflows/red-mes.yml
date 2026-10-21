@@ -1,7 +1,7 @@
 name: Red mes (informe puntual)
 
-# Baja el export de RED (NARTD, ABI, VSR) de un mes entero y lo deja como
-# artefacto. No escribe en Supabase.
+# Baja el export de RED (NARTD, ABI, VSR) de un mes entero, lo deja como
+# artefacto y lo sube a Storage. No toca tablas.
 on:
   workflow_dispatch:
     inputs:
@@ -49,3 +49,25 @@ jobs:
             red-sync/downloads-mes/*.xlsx
             red-sync/downloads-mes/debug-*.png
           if-no-files-found: ignore
+
+  # Deja los 3 exports en Storage (bucket bono-cadem) para que el panel web
+  # (Administración → Bono Cadem) arme la planilla. Solo corre si bajaron los 3.
+  subir:
+    needs: mes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: red-mes-*
+          path: exports
+      - name: Subir a Storage
+        env:
+          ANIO: ${{ github.event.inputs.anio }}
+          MES: ${{ github.event.inputs.mes }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node red-sync/src/subirMes.mjs ./exports
