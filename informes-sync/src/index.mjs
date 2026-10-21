@@ -2,6 +2,8 @@
 //   npm run start -- envio <envio_id> [si|no]   un envío configurado en el portal
 //                                                (si = disparado a mano)
 //   npm run start -- salas_foco <zona|todas> <destinatarios>   prueba suelta
+//   npm run start -- comparativo <zona> [destinatarios]   informe de la zona + 3 hojas
+//                                                (otras zonas) de comparación
 //   npm run start -- prueba <destinatarios>
 //   npm run start -- alarmas [dias]   alarmas B2B del correo → catálogo de promociones
 // Con SOLO_ARCHIVO=<carpeta> los PDF se guardan ahí y no se envía nada.
@@ -14,6 +16,7 @@ import { cargarDatos, armarZona, aPdf, pct, clp, esc, diaLargo } from "./salas_f
 import { cargarExtrasGestion, registrarCompromisos } from "./gestion.mjs";
 import { htmlGestion } from "./gestion_html.mjs";
 import { htmlEjecutivo, paginasPdf } from "./ejecutivo_html.mjs";
+import { htmlComparativo } from "./comparativo_html.mjs";
 
 // Por defecto sale el informe ejecutivo (3 páginas, para gerencia). FORMATO=detallado
 // arma el informe de gestión completo (fichas por supervisor, anexos).
@@ -108,6 +111,27 @@ const modos = {
     }
     const r = await generarSalasFoco(sb, zonaId, true);
     await guardarOEnviar({ para: arg2 || REMITENTE, ...r });
+  },
+
+  async comparativo() {
+    const sb = supabase();
+    if (!arg1) throw new Error("Falta la zona: npm run start -- comparativo <zona> [destinatarios]");
+    const datos = await cargarDatos(sb, { incluirVisitas: false });
+    const zona = datos.zonas.find((z) => z.nombre.toLowerCase() === arg1.toLowerCase());
+    if (!zona) throw new Error(`Zona desconocida: ${arg1}`);
+    const armadas = datos.zonas.map((z) => armarZona(datos, z.id)).filter((z) => z.salasZona.length);
+    const foco = armadas.find((z) => z.zonaId === zona.id);
+    const extras = await cargarExtrasGestion(sb, datos, foco);
+    const pdf = (await aPdf([htmlComparativo(datos, foco, extras, armadas.filter((z) => z !== foco))]))[0];
+    const sem = datos.semanas[2].semana;
+    const fecha = datos.emitido.toISOString().slice(0, 10);
+    const slug = foco.zona.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_");
+    await guardarOEnviar({
+      para: arg2 || REMITENTE,
+      asunto: `${foco.zona} · Informe semanal y comparativo con otras zonas · Semana ${sem}`,
+      html: `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937"><p>Adjunto el informe de ${esc(foco.zona)} (semana ${sem}) con tres hojas de comparación contra las demás zonas: indicadores, componentes RED y venta perdida NARTD.</p></div>`,
+      adjuntos: [{ filename: `informe_${slug}_comparativo_${fecha}.pdf`, content: pdf, contentType: "application/pdf" }],
+    });
   },
 
   async alarmas() {

@@ -10,7 +10,7 @@
 import { pct, clp, esc, nf, pts, perdidasSala, diaMes, masDias, CSS, RED, PRES, CORTO, celda } from "./salas_foco.mjs";
 import { GUIA_COMPONENTE, brechaTxt, fechaCorta, lista, pp, causaLabelCorta, guiaCausa } from "./gestion.mjs";
 
-const CSS_EJEC = `
+export const CSS_EJEC = `
   body { font-size: 10px; line-height: 1.4; }
   .pag { height: 267mm; overflow: hidden; }
   .cab h1 { font-size: 21px; } .cab { margin-bottom: 8px; }
@@ -226,10 +226,14 @@ function pagina3(datos, z) {
 
 // ---------------------------------------------------------------- documento
 
+export function paginasEjecutivo(datos, z, extras) {
+  return `${pagina1(datos, z, extras)}${pagina2(datos, z, extras)}${pagina3(datos, z)}`;
+}
+
 export function htmlEjecutivo(datos, z, extras) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(z.zona)} · Informe semanal de gestión</title>
     <style>${CSS}${CSS_EJEC}</style></head><body>
-    ${pagina1(datos, z, extras)}${pagina2(datos, z, extras)}${pagina3(datos, z)}
+    ${paginasEjecutivo(datos, z, extras)}
   </body></html>`;
 }
 
