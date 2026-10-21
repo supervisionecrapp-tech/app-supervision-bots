@@ -45,10 +45,12 @@ export async function uploadRedFile({ filePath, categoria, anio, semana, supabas
 
   const upsertRows = [];
   let descartadas = 0;
+  const sinCruce = [];
   for (const r of rows) {
     const salaId = salaByKey.get(String(r["Sala"]).trim());
     if (!salaId) {
       descartadas++;
+      sinCruce.push(String(r["Sala"]).trim());
       continue;
     }
     const row = { sala_id: salaId, anio, semana };
@@ -101,5 +103,7 @@ export async function uploadRedFile({ filePath, categoria, anio, semana, supabas
     filas_descartadas: descartadas,
   });
 
+  // Qué salas del export no cruzaron con la maestra (para detectar nombres que no coinciden).
+  if (sinCruce.length) console.log(`Sin cruce (${sinCruce.length}): ${sinCruce.join(" | ")}`);
   return { total: rows.length, cargadas: upsertRows.length, descartadas, eliminadas };
 }
