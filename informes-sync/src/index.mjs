@@ -129,7 +129,7 @@ const modos = {
     await guardarOEnviar({
       para: arg2 || REMITENTE,
       asunto: `${foco.zona} · Informe semanal y comparativo con otras zonas · Semana ${sem}`,
-      html: `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937"><p>Adjunto el informe de ${esc(foco.zona)} (semana ${sem}) con tres hojas de comparación contra las demás zonas: indicadores, componentes RED y venta perdida NARTD.</p></div>`,
+      html: `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937"><p>Adjunto el informe de ${esc(foco.zona)} (semana ${sem}) con las 2 salas con peor resultado arrastrado en RED NARTD y las 2 salas con peor resultado arrastrado en RED NARTD y tres hojas de comparación contra las demás zonas: indicadores, componentes RED y venta perdida NARTD.</p></div>`,
       adjuntos: [{ filename: `informe_${slug}_comparativo_${fecha}.pdf`, content: pdf, contentType: "application/pdf" }],
     });
   },
