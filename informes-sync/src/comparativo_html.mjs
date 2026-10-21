@@ -1,13 +1,12 @@
 // Informe de una zona con hojas de comparación contra las demás zonas.
 // Las primeras 3 páginas son el informe ejecutivo de la zona (ejecutivo_html.mjs);
-// luego una hoja con las 2 salas de peor resultado arrastrado en RED NARTD y
-// 3 hojas de comparación:
+// después van 3 hojas de comparación:
 //   Indicadores  RED y presentismo de todas las zonas, lugar de la zona y su evolución.
 //   Componentes  nota promedio de cada componente RED por zona.
 //   Venta perdida NARTD  monto, monto por sala y causas, por zona.
 // "Otras zonas" es el promedio simple de los valores de las demás zonas (cada
 // zona pesa igual, sin importar cuántas salas tenga).
-import { pct, clp, esc, nf, pts, perdidasSala, diaMes, masDias, CSS, RED, PRES, CORTO } from "./salas_foco.mjs";
+import { pct, clp, esc, nf, pts, diaMes, masDias, CSS, RED, PRES, CORTO } from "./salas_foco.mjs";
 import { pp, fechaCorta } from "./gestion.mjs";
 import { paginasEjecutivo, CSS_EJEC } from "./ejecutivo_html.mjs";
 
@@ -118,44 +117,12 @@ function hojaVentaPerdida(datos, zonas) {
   </section>`;
 }
 
-/** Las 2 salas con peor resultado arrastrado (promedio de las 3 semanas) en RED NARTD. */
-function hojaArrastrado(datos, z) {
-  const sm = z.sem;
-  const meta = z.metas.red_nartd;
-  const supDe = (id) => z.supervisores.find((g) => g.salas.some((x) => x.sala_id === id))?.nombre ?? "–";
-  const filas = z.salasZona.map((sa) => {
-    const v = datos.filasSem.map((f) => { const r = f.find((x) => x.sala_id === sa.sala_id); return r?.red_nartd == null ? null : Number(r.red_nartd); });
-    const con = v.filter((x) => x != null);
-    return { sa, v, n: con.length, prom: con.length ? con.reduce((a, b) => a + b, 0) / con.length : null };
-  }).filter((x) => x.prom != null);
-  const orden = filas.filter((x) => x.n >= 2).sort((a, b) => a.prom - b.prom);
-  const top = orden.slice(0, 2);
-  const unaSemana = filas.filter((x) => x.n === 1 && x.prom < top[top.length - 1]?.prom).sort((a, b) => a.prom - b.prom);
-  const tarjeta = (x, i) => {
-    const comps = (perdidasSala(z.comp.nartd.get(x.sa.sala_id), "nartd")?.comps ?? []).filter((k) => k.pierde > 0.002).sort((a, b) => b.pierde - a.pierde).slice(0, 4);
-    const ult = x.v.filter((q) => q != null);
-    const tend = ult.length >= 2 ? ult[ult.length - 1] - ult[0] : null;
-    return `<div class="blq"><h3>${i + 1}. ${esc(x.sa.nombre)} <span class="x">· ${esc(supDe(x.sa.sala_id))}</span></h3>
-      <table class="cmp"><tr><th class="l"></th>${sm.map((w) => `<th>S${w}</th>`).join("")}<th>Promedio 3 semanas</th><th>Oportunidad vs meta</th><th>Tendencia</th></tr>
-        <tr><td class="l b">RED NARTD</td>${x.v.map((q) => `<td class="${q == null ? "na" : q >= meta ? "ok" : "bad"}">${pct(q)}</td>`).join("")}<td class="bad b">${pct(x.prom)}</td><td>+${nf((meta - x.prom) * 100, 1)} pp</td><td>${tend == null ? "–" : `${tend < 0 ? "▼" : "▲"} ${pp(tend)}`}</td></tr></table>
-      <table class="cmp" style="margin-top:4px"><tr><th class="l">Dónde pierde puntos en S${sm[2]}</th><th>Nota</th><th>Puntos que suma si llega a 100%</th></tr>
-        ${comps.length ? comps.map((k) => `<tr><td class="l">${esc(CORTO[k.label] ?? k.label)}</td><td class="${k.nota < 0.7 ? "bad" : ""}">${pct(k.nota, 0)}</td><td>+${pts(k.pierde)} pts</td></tr>`).join("") : `<tr><td class="l" colspan="3">Sin componentes cargados en S${sm[2]}.</td></tr>`}</table></div>`;
-  };
-  return `<section class="pag">
-    ${cab(`${esc(z.zona)} · RED NARTD: resultado arrastrado`, "Las 2 salas con peor promedio de las últimas 3 semanas", `Semana ${sm[2]}<br>Meta ${pct(meta, 0)}`)}
-    ${top.length ? top.map(tarjeta).join("") : `<p class="x">No hay salas con 2 o más semanas de RED NARTD.</p>`}
-    ${unaSemana.length ? `<p class="nota"><b>Con una sola semana de dato</b> (no entran al ranking de arrastre): ${unaSemana.map((x) => `${esc(x.sa.nombre)} ${pct(x.prom)}`).join(" · ")}.</p>` : ""}
-    <p class="nota">Arrastrado: promedio simple de las semanas S${sm[0]} a S${sm[2]} con dato; se exigen al menos 2 semanas. El puntaje por componente reparte lo que le falta a la sala para 100% según el peso de cada componente (SOVI 35, NSS 20, ICE 20, exhibición 12, NSF 5, catálogos 5, POP 3).</p>
-  </section>`;
-}
-
 /** foco: zona armada del informe; otras: las demás zonas armadas (con salas). */
 export function htmlComparativo(datos, foco, extrasFoco, otras) {
   const zonas = [foco, ...[...otras].sort((a, b) => a.zona.localeCompare(b.zona, "es"))];
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(foco.zona)} · Informe y comparativo con otras zonas</title>
     <style>${CSS}${CSS_EJEC}${CSS_COMP}</style></head><body>
     ${paginasEjecutivo(datos, foco, extrasFoco)}
-    ${hojaArrastrado(datos, foco)}
     ${hojaIndicadores(datos, zonas)}${hojaComponentes(datos, zonas)}${hojaVentaPerdida(datos, zonas)}
   </body></html>`;
 }
