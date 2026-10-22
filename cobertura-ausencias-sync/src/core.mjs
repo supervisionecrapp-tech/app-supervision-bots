@@ -138,14 +138,20 @@ export async function sync(supabase, { desde, hasta }) {
     .map((e) => e.id);
   let borradas = 0;
   if (idsABorrar.length > 0) {
+    // Solo protege las que tienen un sugerido 'cargado' (cobertura real). Un
+    // sugerido pendiente/descartado/vencido no cubre nada: si la persona sí
+    // marcó, la ausencia ya no existe y se borra junto con esos sugeridos.
     const { data: referenciadas, error: refError } = await supabase
       .from("cbtrs_turnos_sugeridos")
       .select("ausencia_id")
+      .eq("estado", "cargado")
       .in("ausencia_id", idsABorrar);
     if (refError) throw new Error(refError.message);
     const idsReferenciados = new Set((referenciadas ?? []).map((r) => r.ausencia_id));
     const idsABorrarSeguro = idsABorrar.filter((id) => !idsReferenciados.has(id));
     if (idsABorrarSeguro.length > 0) {
+      const { error: sugError } = await supabase.from("cbtrs_turnos_sugeridos").delete().in("ausencia_id", idsABorrarSeguro);
+      if (sugError) throw new Error(sugError.message);
       const { error: delError } = await supabase.from("cbtrs_ausencias").delete().in("id", idsABorrarSeguro);
       if (delError) throw new Error(delError.message);
     }
