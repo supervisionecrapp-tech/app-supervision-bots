@@ -13,6 +13,9 @@ on:
       manual:
         description: "si = disparado a mano (manda aunque esté desactivado)"
         default: "si"
+      solo_a:
+        description: "Con envio_id: prueba, manda solo a estos correos (coma) y no queda en el log"
+        default: ""
       zona:
         description: "Prueba suelta: zona (talca, viña, arica, iquique o todas)"
         default: "todas"
@@ -52,6 +55,7 @@ jobs:
           MANUAL: ${{ inputs.manual }}
           ZONA: ${{ inputs.zona }}
           PARA: ${{ inputs.para }}
+          SOLO_A: ${{ inputs.solo_a }}
         run: |
           if [ -n "$ENVIO_ID" ]; then
             npm run start -- envio "$ENVIO_ID" "$MANUAL"

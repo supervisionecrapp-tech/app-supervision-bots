@@ -17,6 +17,7 @@ import { cargarExtrasGestion, registrarCompromisos } from "./gestion.mjs";
 import { htmlGestion } from "./gestion_html.mjs";
 import { htmlEjecutivo, paginasPdf } from "./ejecutivo_html.mjs";
 import { htmlComparativo } from "./comparativo_html.mjs";
+import { generarIncidencias } from "./incidencias.mjs";
 
 // Por defecto sale el informe ejecutivo (3 páginas, para gerencia). FORMATO=detallado
 // arma el informe de gestión completo (fichas por supervisor, anexos).
@@ -150,12 +151,22 @@ const modos = {
     if (!envio.activo && !manual) { console.log(`"${envio.nombre}" está desactivado; no se envía.`); return; }
     const { data: dest, error: e2 } = await sb.from("informes_destinatarios").select("email").eq("envio_id", envio.id).eq("activo", true);
     if (e2) throw new Error(`informes_destinatarios: ${e2.message}`);
-    const para = dest.map((d) => d.email);
+    // SOLO_A: prueba desde el workflow; va únicamente a esos correos y no
+    // queda en el log (así no cuenta como el envío del día).
+    const soloA = (process.env.SOLO_A || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const para = soloA.length ? soloA : dest.map((d) => d.email);
     if (!para.length) { console.log(`"${envio.nombre}" no tiene destinatarios activos.`); return; }
 
-    const log = (ok, detalle) => sb.from("informes_envios_log").insert({ envio_id: envio.id, manual, destinatarios: para, ok, detalle });
+    const log = (ok, detalle) => soloA.length ? null : sb.from("informes_envios_log").insert({ envio_id: envio.id, manual, destinatarios: para, ok, detalle });
     try {
-      const r = await generarSalasFoco(sb, envio.zona_id, envio.incluir_visitas);
+      const r = envio.informe === "incidencias" ? await generarIncidencias(sb) : await generarSalasFoco(sb, envio.zona_id, envio.incluir_visitas);
+      if (r.vacio) {
+        // Semana sin incidencias: no hay nada que mandar, y no es un fallo.
+        const detalle = `Sin incidencias del ${r.desde} al ${r.hasta}; no se envió.`;
+        if (!process.env.SOLO_ARCHIVO) await log(true, detalle);
+        console.log(`"${envio.nombre}": ${detalle}`);
+        return;
+      }
       await guardarOEnviar({ para: para.join(", "), ...r });
       if (!process.env.SOLO_ARCHIVO) await log(true, r.asunto);
       console.log(`"${envio.nombre}" enviado a ${para.length} destinatario(s).`);
