@@ -36,7 +36,8 @@ jobs:
       - run: scrapling install
       - run: python -m camoufox fetch
       - name: Instalar xvfb y xdotool
-        run: sudo apt-get install -y xvfb xdotool
+        run: sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=20 xvfb xdotool
+        timeout-minutes: 4
       - name: Enrolar
         env:
           FRAX_USER: ${{ secrets.FRAX_USER }}

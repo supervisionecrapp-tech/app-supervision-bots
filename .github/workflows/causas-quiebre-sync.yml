@@ -35,7 +35,13 @@ jobs:
           node-version: 22
 
       - run: npm install
-      - run: npx playwright install --with-deps chromium
+      # Navegador desde el CDN de Playwright; libs del sistema aparte y con
+      # tope (el mirror apt de Azure a veces se arrastra 10+ min y colgaba el job).
+      - run: npx playwright install chromium
+        timeout-minutes: 3
+      - name: Libs del sistema (apt, con tope)
+        run: timeout 120 npx playwright install-deps chromium || echo "apt no respondio a tiempo, sigo con las libs del runner"
+        timeout-minutes: 3
 
       - name: Detectar día de la semana
         id: day

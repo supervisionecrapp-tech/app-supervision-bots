@@ -42,7 +42,8 @@ jobs:
 
       - name: Instalar xvfb y xdotool
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y xvfb xdotool
+        run: sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=20 xvfb xdotool
+        timeout-minutes: 4
 
       - name: Sync
         env:
