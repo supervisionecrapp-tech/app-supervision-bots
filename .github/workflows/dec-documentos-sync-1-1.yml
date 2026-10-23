@@ -11,7 +11,7 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: dec-documentos-sync
@@ -26,9 +26,18 @@ jobs:
           node-version: 22
 
       - run: npm install
-      - run: npx playwright install --with-deps chromium
+      # El navegador baja del CDN de Playwright (rapido). Las libs del sistema
+      # van aparte con tope de tiempo: el mirror apt de Azure a veces se
+      # arrastra 10+ min (corridas del 23-10) y colgaba todo el job. Si apt
+      # no responde, se sigue con las libs que ya trae el runner.
+      - run: npx playwright install chromium
+        timeout-minutes: 3
+      - name: Libs del sistema (apt, con tope)
+        run: timeout 120 npx playwright install-deps chromium || echo "apt no respondio a tiempo, sigo con las libs del runner"
+        timeout-minutes: 3
 
       - name: Sync DEC Documentos
+        timeout-minutes: 6
         env:
           DEC_IDD_USER: ${{ secrets.DEC_IDD_USER }}
           DEC_IDD_PASS: ${{ secrets.DEC_IDD_PASS }}
