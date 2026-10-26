@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { gvLogin, gvActiveUsers, gvAttendanceBookAll, gvUsersToFilas, normalizeRut } from "./gv.mjs";
+import { gvLogin, gvActiveUsers, gvUserList, gvAttendanceBookAll, gvUsersToFilas, normalizeRut } from "./gv.mjs";
 
 // Corre una vez al día (ver .github/workflows/asistencia-sync.yml) y
 // mantiene `turnos_colaboradores` — el roster que usa la app móvil para
@@ -50,6 +50,18 @@ function soloFecha(contractDate) {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
+// Birthdate: la doc dice "yyyy-MM-dd", pero GV mezcla formatos entre campos
+// (ContractDate viene compacto), así que se aceptan los dos.
+function fechaNacimiento(valor) {
+  if (typeof valor !== "string") return null;
+  const m = valor.match(/^(\d{4})-?(\d{2})-?(\d{2})/);
+  if (!m) return null;
+  const [, y, mo, d] = m;
+  // GV usa 0001-01-01 / 1900-01-01 como "sin dato".
+  if (Number(y) < 1920 || Number(mo) < 1 || Number(mo) > 12 || Number(d) < 1 || Number(d) > 31) return null;
+  return `${y}-${mo}-${d}`;
+}
+
 // LastName de GV trae ambos apellidos juntos: paterno = hasta el primer
 // espacio, materno = todo lo que sigue (aunque el paterno quede como "DE").
 function partirNombre(u) {
@@ -86,11 +98,26 @@ async function sync(supabase) {
 
   // Cargo y fecha de contrato: ya vienen en el mismo ActiveUsers de arriba,
   // sin depender de fecha (ver comentario de cabecera).
+  // Cumpleaños y turno semanal: documentados en /User/List. Si ActiveUsers
+  // no los trae (no se sabe sin probar contra la cuenta real), se completan
+  // con una llamada a List; los que ya vienen no se piden dos veces.
+  const faltanExtras = !activosConRut.some((u) => u.Birthdate || u.WeeklyWorkingHoursCodeDescription);
+  const extraPorRut = new Map();
+  if (faltanExtras) {
+    for (const u of await gvUserList(token)) {
+      if (u.Identifier) extraPorRut.set(normalizeRut(u.Identifier), u);
+    }
+  }
+
   const datosPorRut = new Map();
   for (const u of activosConRut) {
-    datosPorRut.set(normalizeRut(u.Identifier), {
+    const rutKey = normalizeRut(u.Identifier);
+    const extra = extraPorRut.get(rutKey) ?? u;
+    datosPorRut.set(rutKey, {
       cargo: u.PositionDescription?.trim() || null,
       fechaContrato: soloFecha(u.ContractDate),
+      fechaNacimiento: fechaNacimiento(extra.Birthdate),
+      turnoGv: extra.WeeklyWorkingHoursCodeDescription?.trim() || null,
     });
   }
 
@@ -127,6 +154,8 @@ async function sync(supabase) {
       grupo_gv: grupoPorRut.get(rutNormalizado)?.grupo ?? null,
       cargo: datos?.cargo ?? null,
       fecha_contrato: datos?.fechaContrato ?? null,
+      fecha_nacimiento: datos?.fechaNacimiento ?? null,
+      turno_gv: datos?.turnoGv ?? null,
       activo: true,
       visto_el: hoy,
       updated_at: nowIso,
@@ -148,7 +177,9 @@ async function sync(supabase) {
   if (inactivarError) throw new Error(inactivarError.message);
 
   const conGrupo = filas.filter((f) => f.grupo_gv).length;
-  return { activos: filas.length, conGrupo, desactivados: count ?? 0 };
+  const conNacimiento = filas.filter((f) => f.fecha_nacimiento).length;
+  const conTurno = filas.filter((f) => f.turno_gv).length;
+  return { activos: filas.length, conGrupo, conNacimiento, conTurno, desactivados: count ?? 0 };
 }
 
 async function logRun(supabase, { startedAt, status, errorMessage, filasCargadas }) {
@@ -172,7 +203,7 @@ async function main() {
 
   try {
     const result = await sync(supabase);
-    console.log(`Listo: ${result.activos} activos (${result.conGrupo} con grupo), ${result.desactivados} marcados inactivos.`);
+    console.log(`Listo: ${result.activos} activos (${result.conGrupo} con grupo, ${result.conNacimiento} con cumpleaños, ${result.conTurno} con turno), ${result.desactivados} marcados inactivos.`);
     await logRun(supabase, { startedAt, status: "success", filasCargadas: result.activos });
   } catch (err) {
     await logRun(supabase, {
