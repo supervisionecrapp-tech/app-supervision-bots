@@ -46,11 +46,15 @@ export async function generarIncidencias(sb) {
   const zip = new JSZip();
   const hoja = [["Zona", "Fecha", "Día", "Sala", "Supervisor", "Tipo", "Observación", "Foto"]];
   for (const f of filas) {
-    const dl = await sb.storage.from(BUCKET).download(f.evidencia_path);
-    if (dl.error) throw new Error(`Foto ${f.evidencia_path}: ${dl.error.message}`);
-    const ext = f.evidencia_path.split(".").pop();
-    const ruta = `fotos/${slug(f.zona)}/${slug(sala(f.nombreSala))}_${f.fecha}.${ext}`;
-    zip.file(ruta, Buffer.from(await dl.data.arrayBuffer()));
+    // Las subidas rápido desde Difusión no traen foto.
+    let ruta = "(sin foto)";
+    if (f.evidencia_path) {
+      const dl = await sb.storage.from(BUCKET).download(f.evidencia_path);
+      if (dl.error) throw new Error(`Foto ${f.evidencia_path}: ${dl.error.message}`);
+      const ext = f.evidencia_path.split(".").pop();
+      ruta = `fotos/${slug(f.zona)}/${slug(sala(f.nombreSala))}_${f.fecha}.${ext}`;
+      zip.file(ruta, Buffer.from(await dl.data.arrayBuffer()));
+    }
     hoja.push([persona(f.zona), fmt(f.fecha), DIAS[diaDe(f.fecha)], sala(f.nombreSala), persona(f.supervisor_nombre), f.tipo,
       [f.motivo, f.observacion].filter(Boolean).join(" — "), ruta]);
   }
