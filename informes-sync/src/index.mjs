@@ -46,14 +46,14 @@ function inicioChile(f) {
   return new Date(new Date(`${f}T00:00:00Z`).getTime() - off * 3600000);
 }
 
-/** Uso de la app por los supervisores de una zona: encuestas de la última semana cerrada y última conexión. */
+/** Uso de la app por los supervisores de una zona: encuestas de la última semana cerrada y la última encuesta. */
 async function usoApp(sb, datos, zonaNombre) {
   const zona = datos.zonas.find((z) => z.nombre.toLowerCase() === zonaNombre.toLowerCase());
   if (!zona) throw new Error(`Zona ${zonaNombre} no encontrada`);
   const { data: salas, error } = await sb.from("salas").select("supervisor_id").eq("zona_id", zona.id).eq("is_active", true).not("supervisor_id", "is", null);
   if (error) throw new Error(`salas: ${error.message}`);
   const ids = [...new Set(salas.map((s) => s.supervisor_id))];
-  const { data: sups, error: e2 } = await sb.from("profiles").select("id, full_name, auth_user_id").in("id", ids).eq("role", "supervisor").eq("is_active", true);
+  const { data: sups, error: e2 } = await sb.from("profiles").select("id, full_name").in("id", ids).eq("role", "supervisor").eq("is_active", true);
   if (e2) throw new Error(`profiles: ${e2.message}`);
   const desde = datos.lunes.toISOString().slice(0, 10);
   const hasta = masDias(datos.lunes, 7).toISOString().slice(0, 10);
@@ -62,8 +62,7 @@ async function usoApp(sb, datos, zonaNombre) {
     const { count } = await sb.from("encuesta_visitas").select("id", { count: "exact", head: true }).eq("promotor_id", sp.id)
       .gte("created_at", inicioChile(desde).toISOString()).lt("created_at", inicioChile(hasta).toISOString());
     const { data: ult } = await sb.from("encuesta_visitas").select("created_at").eq("promotor_id", sp.id).order("created_at", { ascending: false }).limit(1);
-    const { data: u } = sp.auth_user_id ? await sb.auth.admin.getUserById(sp.auth_user_id) : { data: null };
-    filas.push({ nombre: titulo(sp.full_name), encuestas: count ?? 0, ultimaEncuesta: ult?.[0]?.created_at, ultimaConexion: u?.user?.last_sign_in_at });
+    filas.push({ nombre: titulo(sp.full_name), encuestas: count ?? 0, ultimaEncuesta: ult?.[0]?.created_at });
   }
   return { filas, desde, rango: `${diaMes(datos.lunes)}–${diaMes(masDias(datos.lunes, 6))}` };
 }
@@ -181,12 +180,11 @@ const modos = {
     const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
       <p>Mauro,</p>
       <p>Te envío los avances por zonas de la semana ${sem}: un informe por cada una (Arica, Iquique, Talca y Viña), adjuntos.</p>
-      <p>Igualmente te dejo el uso de la app por los supervisores de Talca: número de encuestas y última conexión.</p>
+      <p>Igualmente te dejo el uso de la app por los supervisores de Talca: número de encuestas.</p>
       <table style="border-collapse:collapse;margin:8px 0">
-        <tr><th ${th}>Supervisor</th><th ${th}>Encuestas semana ${sem} (${uso.rango})</th><th ${th}>Última encuesta</th><th ${th}>Última conexión</th></tr>
-        ${uso.filas.map((f) => `<tr><td ${td}><b>${esc(f.nombre)}</b></td><td ${td} align="center">${f.encuestas}</td><td ${td}>${horaChile(f.ultimaEncuesta)}</td><td ${td}>${horaChile(f.ultimaConexion)}</td></tr>`).join("")}
-      </table>
-      <p style="color:#6b7280;font-size:12px">La conexión es el último inicio de sesión; la app mantiene la sesión abierta, por eso la última encuesta suele ser más reciente.</p></div>`;
+        <tr><th ${th}>Supervisor</th><th ${th}>Encuestas semana ${sem} (${uso.rango})</th><th ${th}>Última encuesta</th></tr>
+        ${uso.filas.map((f) => `<tr><td ${td}><b>${esc(f.nombre)}</b></td><td ${td} align="center">${f.encuestas}</td><td ${td}>${horaChile(f.ultimaEncuesta)}</td></tr>`).join("")}
+      </table></div>`;
     await guardarOEnviar({ para: arg1 || REMITENTE, asunto: `${process.env.ASUNTO_PREFIJO ?? ""}Avances por zonas · Semana ${sem}`, html, adjuntos: r.adjuntos });
   },
 
