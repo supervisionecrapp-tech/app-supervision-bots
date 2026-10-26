@@ -115,6 +115,25 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
   return { adjuntos, html, asunto };
 }
 
+/** Correo para Mauro: los informes de todas las zonas y el uso de la app de los supervisores de Talca. */
+async function generarResumenZonas(sb) {
+    const r = await generarSalasFoco(sb, null, false);
+    const datos = await cargarDatos(sb, { incluirVisitas: false });
+    const uso = await usoApp(sb, datos, "Talca");
+    const sem = datos.semanas[2].semana;
+    const th = `style="padding:4px 10px;border-bottom:2px solid #d1d5db;text-align:left;font-size:12px;color:#4b5563"`;
+    const td = `style="padding:4px 10px;border-bottom:1px solid #eef0f2;font-size:13px"`;
+    const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
+      <p>Mauro,</p>
+      <p>Te envío los avances por zonas de la semana ${sem}: un informe por cada una (Arica, Iquique, Talca y Viña), adjuntos.</p>
+      <p>Igualmente te dejo el uso de la app por los supervisores de Talca: número de encuestas.</p>
+      <table style="border-collapse:collapse;margin:8px 0">
+        <tr><th ${th}>Supervisor</th><th ${th}>Encuestas semana ${sem} (${uso.rango})</th><th ${th}>Última encuesta</th></tr>
+        ${uso.filas.map((f) => `<tr><td ${td}><b>${esc(f.nombre)}</b></td><td ${td} align="center">${f.encuestas}</td><td ${td}>${horaChile(f.ultimaEncuesta)}</td></tr>`).join("")}
+      </table></div>`;
+  return { adjuntos: r.adjuntos, html, asunto: `${process.env.ASUNTO_PREFIJO ?? ""}Avances por zonas · Semana ${sem}` };
+}
+
 async function guardarOEnviar({ para, cc, asunto, html, adjuntos }) {
   if (process.env.SOLO_ARCHIVO) {
     await mkdir(process.env.SOLO_ARCHIVO, { recursive: true });
@@ -170,22 +189,8 @@ const modos = {
   },
 
   async resumen_zonas() {
-    const sb = supabase();
-    const r = await generarSalasFoco(sb, null, false);
-    const datos = await cargarDatos(sb, { incluirVisitas: false });
-    const uso = await usoApp(sb, datos, "Talca");
-    const sem = datos.semanas[2].semana;
-    const th = `style="padding:4px 10px;border-bottom:2px solid #d1d5db;text-align:left;font-size:12px;color:#4b5563"`;
-    const td = `style="padding:4px 10px;border-bottom:1px solid #eef0f2;font-size:13px"`;
-    const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
-      <p>Mauro,</p>
-      <p>Te envío los avances por zonas de la semana ${sem}: un informe por cada una (Arica, Iquique, Talca y Viña), adjuntos.</p>
-      <p>Igualmente te dejo el uso de la app por los supervisores de Talca: número de encuestas.</p>
-      <table style="border-collapse:collapse;margin:8px 0">
-        <tr><th ${th}>Supervisor</th><th ${th}>Encuestas semana ${sem} (${uso.rango})</th><th ${th}>Última encuesta</th></tr>
-        ${uso.filas.map((f) => `<tr><td ${td}><b>${esc(f.nombre)}</b></td><td ${td} align="center">${f.encuestas}</td><td ${td}>${horaChile(f.ultimaEncuesta)}</td></tr>`).join("")}
-      </table></div>`;
-    await guardarOEnviar({ para: arg1 || REMITENTE, asunto: `${process.env.ASUNTO_PREFIJO ?? ""}Avances por zonas · Semana ${sem}`, html, adjuntos: r.adjuntos });
+    const r = await generarResumenZonas(supabase());
+    await guardarOEnviar({ para: arg1 || REMITENTE, ...r });
   },
 
   async alarmas() {
@@ -215,7 +220,9 @@ const modos = {
 
     const log = (ok, detalle) => soloA.length ? null : sb.from("informes_envios_log").insert({ envio_id: envio.id, manual, destinatarios: [...para, ...copias], ok, detalle });
     try {
-      const r = envio.informe === "incidencias" ? await generarIncidencias(sb) : await generarSalasFoco(sb, envio.zona_id, envio.incluir_visitas);
+      const r = envio.informe === "incidencias" ? await generarIncidencias(sb)
+        : envio.informe === "resumen_zonas" ? await generarResumenZonas(sb)
+        : await generarSalasFoco(sb, envio.zona_id, envio.incluir_visitas);
       if (r.vacio) {
         // Semana sin incidencias: no hay nada que mandar, y no es un fallo.
         const detalle = `Sin incidencias del ${r.desde} al ${r.hasta}; no se envió.`;
