@@ -22,6 +22,12 @@ on:
       para:
         description: "Prueba suelta: destinatarios (separados por coma)"
         default: "supervisionecrapp@gmail.com"
+      modo:
+        description: "Vacío = informe de la zona; resumen_zonas = los 4 informes en un correo con el uso de la app de Talca"
+        default: ""
+      asunto_prefijo:
+        description: "Texto antes del asunto (ej. [Prueba] )"
+        default: ""
 
 jobs:
   enviar:
@@ -56,9 +62,13 @@ jobs:
           ZONA: ${{ inputs.zona }}
           PARA: ${{ inputs.para }}
           SOLO_A: ${{ inputs.solo_a }}
+          MODO: ${{ inputs.modo }}
+          ASUNTO_PREFIJO: ${{ inputs.asunto_prefijo }}
         run: |
           if [ -n "$ENVIO_ID" ]; then
             npm run start -- envio "$ENVIO_ID" "$MANUAL"
+          elif [ -n "$MODO" ]; then
+            npm run start -- "$MODO" "$PARA"
           else
             npm run start -- salas_foco "$ZONA" "$PARA"
           fi

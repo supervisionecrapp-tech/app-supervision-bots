@@ -4,6 +4,8 @@
 //   npm run start -- salas_foco <zona|todas> <destinatarios>   prueba suelta
 //   npm run start -- comparativo <zona> [destinatarios]   informe de la zona + 3 hojas
 //                                                (otras zonas) de comparación
+//   npm run start -- resumen_zonas <destinatarios>   los informes de todas las zonas en un
+//                                                    solo correo para Mauro, con el uso de la app de Talca
 //   npm run start -- prueba <destinatarios>
 //   npm run start -- alarmas [dias]   alarmas B2B del correo → catálogo de promociones
 // Con SOLO_ARCHIVO=<carpeta> los PDF se guardan ahí y no se envía nada.
@@ -12,7 +14,7 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { enviarCorreo, REMITENTE } from "./correo.mjs";
 import { cargarAlarmas, completarResumenAlarmas, volcarResumenAlarmas } from "./alarmas.mjs";
-import { cargarDatos, armarZona, aPdf, pct, clp, esc, diaLargo } from "./salas_foco.mjs";
+import { cargarDatos, armarZona, aPdf, pct, clp, esc, diaLargo, diaMes, masDias, titulo } from "./salas_foco.mjs";
 import { cargarExtrasGestion, registrarCompromisos } from "./gestion.mjs";
 import { htmlGestion } from "./gestion_html.mjs";
 import { htmlEjecutivo, paginasPdf } from "./ejecutivo_html.mjs";
@@ -31,6 +33,39 @@ function supabase() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
   return createClient(url, key, { auth: { persistSession: false } });
+}
+
+
+/** Hora de Chile de un instante, "dd/mm HH:MM". */
+const horaChile = (d) => (d ? new Date(d).toLocaleString("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).replace(",", "") : "–");
+
+/** Instante en que empieza una fecha (YYYY-MM-DD) en hora de Chile. */
+function inicioChile(f) {
+  const d = new Date(`${f}T12:00:00Z`);
+  const off = (new Date(d.toLocaleString("en-US", { timeZone: "America/Santiago" })) - new Date(d.toLocaleString("en-US", { timeZone: "UTC" }))) / 3600000;
+  return new Date(new Date(`${f}T00:00:00Z`).getTime() - off * 3600000);
+}
+
+/** Uso de la app por los supervisores de una zona: encuestas de la última semana cerrada y última conexión. */
+async function usoApp(sb, datos, zonaNombre) {
+  const zona = datos.zonas.find((z) => z.nombre.toLowerCase() === zonaNombre.toLowerCase());
+  if (!zona) throw new Error(`Zona ${zonaNombre} no encontrada`);
+  const { data: salas, error } = await sb.from("salas").select("supervisor_id").eq("zona_id", zona.id).eq("is_active", true).not("supervisor_id", "is", null);
+  if (error) throw new Error(`salas: ${error.message}`);
+  const ids = [...new Set(salas.map((s) => s.supervisor_id))];
+  const { data: sups, error: e2 } = await sb.from("profiles").select("id, full_name, auth_user_id").in("id", ids).eq("role", "supervisor").eq("is_active", true);
+  if (e2) throw new Error(`profiles: ${e2.message}`);
+  const desde = datos.lunes.toISOString().slice(0, 10);
+  const hasta = masDias(datos.lunes, 7).toISOString().slice(0, 10);
+  const filas = [];
+  for (const sp of [...sups].sort((a, b) => a.full_name.localeCompare(b.full_name, "es"))) {
+    const { count } = await sb.from("encuesta_visitas").select("id", { count: "exact", head: true }).eq("promotor_id", sp.id)
+      .gte("created_at", inicioChile(desde).toISOString()).lt("created_at", inicioChile(hasta).toISOString());
+    const { data: ult } = await sb.from("encuesta_visitas").select("created_at").eq("promotor_id", sp.id).order("created_at", { ascending: false }).limit(1);
+    const { data: u } = sp.auth_user_id ? await sb.auth.admin.getUserById(sp.auth_user_id) : { data: null };
+    filas.push({ nombre: titulo(sp.full_name), encuestas: count ?? 0, ultimaEncuesta: ult?.[0]?.created_at, ultimaConexion: u?.user?.last_sign_in_at });
+  }
+  return { filas, desde, rango: `${diaMes(datos.lunes)}–${diaMes(masDias(datos.lunes, 6))}` };
 }
 
 /** Arma los PDF de las zonas pedidas (null = todas) y el cuerpo del correo. */
@@ -133,6 +168,26 @@ const modos = {
       html: `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937"><p>Adjunto el informe de ${esc(foco.zona)} (semana ${sem}) con las 2 salas con peor resultado arrastrado en RED NARTD y tres hojas de comparación contra las demás zonas: indicadores, componentes RED y venta perdida NARTD.</p></div>`,
       adjuntos: [{ filename: `informe_${slug}_comparativo_${fecha}.pdf`, content: pdf, contentType: "application/pdf" }],
     });
+  },
+
+  async resumen_zonas() {
+    const sb = supabase();
+    const r = await generarSalasFoco(sb, null, false);
+    const datos = await cargarDatos(sb, { incluirVisitas: false });
+    const uso = await usoApp(sb, datos, "Talca");
+    const sem = datos.semanas[2].semana;
+    const th = `style="padding:4px 10px;border-bottom:2px solid #d1d5db;text-align:left;font-size:12px;color:#4b5563"`;
+    const td = `style="padding:4px 10px;border-bottom:1px solid #eef0f2;font-size:13px"`;
+    const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
+      <p>Mauro,</p>
+      <p>Te envío los avances por zonas de la semana ${sem}: un informe por cada una (Arica, Iquique, Talca y Viña), adjuntos.</p>
+      <p>Igualmente te dejo el uso de la app por los supervisores de Talca: número de encuestas y última conexión.</p>
+      <table style="border-collapse:collapse;margin:8px 0">
+        <tr><th ${th}>Supervisor</th><th ${th}>Encuestas semana ${sem} (${uso.rango})</th><th ${th}>Última encuesta</th><th ${th}>Última conexión</th></tr>
+        ${uso.filas.map((f) => `<tr><td ${td}><b>${esc(f.nombre)}</b></td><td ${td} align="center">${f.encuestas}</td><td ${td}>${horaChile(f.ultimaEncuesta)}</td><td ${td}>${horaChile(f.ultimaConexion)}</td></tr>`).join("")}
+      </table>
+      <p style="color:#6b7280;font-size:12px">La conexión es el último inicio de sesión; la app mantiene la sesión abierta, por eso la última encuesta suele ser más reciente.</p></div>`;
+    await guardarOEnviar({ para: arg1 || REMITENTE, asunto: `${process.env.ASUNTO_PREFIJO ?? ""}Avances por zonas · Semana ${sem}`, html, adjuntos: r.adjuntos });
   },
 
   async alarmas() {
