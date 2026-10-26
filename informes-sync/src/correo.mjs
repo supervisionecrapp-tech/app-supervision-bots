@@ -5,7 +5,7 @@ import nodemailer from "nodemailer";
 
 export const REMITENTE = "supervisionecrapp@gmail.com";
 
-export async function enviarCorreo({ para, asunto, html, adjuntos = [] }) {
+export async function enviarCorreo({ para, cc, asunto, html, adjuntos = [] }) {
   const pass = (process.env.GMAIL_APP_PASSWORD || "").replace(/\s+/g, "");
   if (!pass) throw new Error("Falta GMAIL_APP_PASSWORD");
 
@@ -19,6 +19,7 @@ export async function enviarCorreo({ para, asunto, html, adjuntos = [] }) {
   const info = await transporte.sendMail({
     from: `"Informes Supervisión ECR" <${REMITENTE}>`,
     to: para,
+    ...(cc ? { cc } : {}),
     subject: asunto,
     html,
     attachments: adjuntos,

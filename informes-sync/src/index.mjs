@@ -81,7 +81,7 @@ async function generarSalasFoco(sb, zonaId, incluirVisitas) {
   return { adjuntos, html, asunto };
 }
 
-async function guardarOEnviar({ para, asunto, html, adjuntos }) {
+async function guardarOEnviar({ para, cc, asunto, html, adjuntos }) {
   if (process.env.SOLO_ARCHIVO) {
     await mkdir(process.env.SOLO_ARCHIVO, { recursive: true });
     for (const a of adjuntos) await writeFile(path.join(process.env.SOLO_ARCHIVO, a.filename), a.content);
@@ -89,7 +89,7 @@ async function guardarOEnviar({ para, asunto, html, adjuntos }) {
     console.log(`Guardado en ${process.env.SOLO_ARCHIVO}: ${adjuntos.map((a) => a.filename).join(", ")}`);
     return;
   }
-  await enviarCorreo({ para, asunto, html, adjuntos });
+  await enviarCorreo({ para, cc, asunto, html, adjuntos });
 }
 
 const modos = {
@@ -149,15 +149,18 @@ const modos = {
     if (error) throw new Error(`informes_envios: ${error.message}`);
     if (!envio) throw new Error(`Envío ${arg1} no existe`);
     if (!envio.activo && !manual) { console.log(`"${envio.nombre}" está desactivado; no se envía.`); return; }
-    const { data: dest, error: e2 } = await sb.from("informes_destinatarios").select("email").eq("envio_id", envio.id).eq("activo", true);
+    const { data: dest, error: e2 } = await sb.from("informes_destinatarios").select("email, copia").eq("envio_id", envio.id).eq("activo", true);
     if (e2) throw new Error(`informes_destinatarios: ${e2.message}`);
     // SOLO_A: prueba desde el workflow; va únicamente a esos correos y no
     // queda en el log (así no cuenta como el envío del día).
     const soloA = (process.env.SOLO_A || "").split(",").map((s) => s.trim()).filter(Boolean);
-    const para = soloA.length ? soloA : dest.map((d) => d.email);
+    // Los marcados "copia" van en Cc; si todos lo están, van como destinatarios.
+    const principales = dest.filter((d) => !d.copia).map((d) => d.email);
+    const copias = principales.length ? dest.filter((d) => d.copia).map((d) => d.email) : [];
+    const para = soloA.length ? soloA : principales.length ? principales : dest.map((d) => d.email);
     if (!para.length) { console.log(`"${envio.nombre}" no tiene destinatarios activos.`); return; }
 
-    const log = (ok, detalle) => soloA.length ? null : sb.from("informes_envios_log").insert({ envio_id: envio.id, manual, destinatarios: para, ok, detalle });
+    const log = (ok, detalle) => soloA.length ? null : sb.from("informes_envios_log").insert({ envio_id: envio.id, manual, destinatarios: [...para, ...copias], ok, detalle });
     try {
       const r = envio.informe === "incidencias" ? await generarIncidencias(sb) : await generarSalasFoco(sb, envio.zona_id, envio.incluir_visitas);
       if (r.vacio) {
@@ -167,7 +170,7 @@ const modos = {
         console.log(`"${envio.nombre}": ${detalle}`);
         return;
       }
-      await guardarOEnviar({ para: para.join(", "), ...r });
+      await guardarOEnviar({ para: para.join(", "), cc: soloA.length ? "" : copias.join(", "), ...r });
       if (!process.env.SOLO_ARCHIVO) await log(true, r.asunto);
       console.log(`"${envio.nombre}" enviado a ${para.length} destinatario(s).`);
     } catch (e) {

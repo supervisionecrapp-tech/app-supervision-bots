@@ -67,8 +67,8 @@ export async function generarIncidencias(sb) {
       lista.map((f) => `<li>${DIAS_CORTO[diaDe(f.fecha)]} ${f.fecha.slice(8)}: ${esc(sala(f.nombreSala))} <span style="color:#6b7280">(${esc(persona(f.supervisor_nombre))})</span></li>`).join("")}</ul>`;
   }).join("");
   const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
-    <p>Chicas mando el detalle</p>
-    <p>Incidencias de la semana del ${fmt(desde)} al ${fmt(hasta)} (${filas.length} en total):</p>${bloques}
+    <p>Chicas les mando las incidencias de la semana pasada, favor enviar a Mauricio para que sea compartida con Martín y Bastián.</p>
+    <p>Detalle de la semana del ${fmt(desde)} al ${fmt(hasta)} (${filas.length} en total):</p>${bloques}
     <p style="margin-top:16px">Adjunto el comprimido con la evidencia fotográfica, en carpetas por zona, y la planilla con el detalle.</p></div>`;
 
   return {
