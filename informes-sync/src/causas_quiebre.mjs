@@ -95,11 +95,17 @@ export async function generarCausasQuiebre(sb, envio, { todas = false } = {}) {
     <div style="color:#6b7280;margin-bottom:8px">SKU encontrados en la última visita · semana${semanas.length > 1 ? "s" : ""} ${semanas.join(", ")} · emitido ${fmtFecha(fecha)} · <b>${todos.length} SKU</b> · <b>${clp(totalVp)}</b></div>
     ${varias ? resumen + porSala : ""}${bloques}</body></html>`;
   const [pdf] = await aPdf([pdfHtml]);
+  const recuadros = grupos.map((g) => {
+    const por = new Map();
+    for (const r of g.skus) { const k = r.causa || "Sin causa"; const a = por.get(k) ?? { n: 0, vp: 0 }; a.n++; a.vp += r.venta_perdida ?? 0; por.set(k, a); }
+    const filas = [...por].sort((a, b) => b[1].vp - a[1].vp).map(([c, a]) => `<div style="padding:2px 0">${esc(c)} (${a.n}) = ${clp(a.vp)}</div>`).join("");
+    return `<div style="border:1px solid #d1d5db;border-radius:6px;padding:8px 12px;margin:8px 0;max-width:460px"><div style="font-weight:700;padding-bottom:4px">${esc(g.nombre)} = ${clp(g.total)}</div>${filas}</div>`;
+  }).join("");
   const ultimaMed = grupos.length === 1 ? `la última medición de <b>${esc(grupos[0].nombre)}</b>` : `la última medición de <b>${esc(grupos.map((g) => g.nombre).join(", "))}</b>`;
   const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
     <p>Howard,</p>
     <p>Te dejo el listado de causas de quiebre en ${ultimaMed} (semana ${semanas.join(", ")}), con ${todos.length} SKU y ${clp(totalVp)} de venta perdida. El desglose por causal es el siguiente:</p>
-    ${resumen}
+    ${recuadros}
     <p>El detalle por SKU va en el PDF adjunto${varias ? ", una hoja por sala" : ""}.</p>
     <p>Saludos.</p></div>`;
   return {
