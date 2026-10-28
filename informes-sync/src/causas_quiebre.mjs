@@ -30,18 +30,26 @@ export async function generarCausasQuiebre(sb, envio, { todas = false } = {}) {
   if (!salas.length) throw new Error(`La zona ${zona.nombre} no tiene salas activas`);
   const porId = new Map(salas.map((s) => [s.id, s]));
 
-  const { data: filas, error } = await sb.from("causas_quiebre")
+  let { data: filas, error } = await sb.from("causas_quiebre")
     .select("sala_id, anio, semana, sku_ean, sku_nombre, dias_sin_venta, ultima_fecha_venta, stock, prom_vta_sem, causa, venta_perdida")
     .in("sala_id", [...porId.keys()])
     .order("anio", { ascending: false }).order("semana", { ascending: false })
     .limit(5000);
   if (error) throw new Error(`causas_quiebre: ${error.message}`);
 
+  // Solo lo fresco: la semana ISO en curso (hora de Chile). Las visitas de semanas
+  // anteriores no se mandan aunque la sala no tenga medición nueva.
+  const hoy = new Date(new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }) + "T00:00:00Z");
+  const jueves = new Date(hoy); jueves.setUTCDate(hoy.getUTCDate() + 3 - ((hoy.getUTCDay() + 6) % 7));
+  const anioIso = jueves.getUTCFullYear();
+  const semanaIso = Math.ceil(((jueves - new Date(Date.UTC(anioIso, 0, 1))) / 86400000 + 1) / 7);
+  filas = filas.filter((f) => f.anio === anioIso && f.semana === semanaIso);
+
   // Última semana con datos de cada sala = su última visita.
   const ultima = new Map();
   for (const f of filas) if (!ultima.has(f.sala_id)) ultima.set(f.sala_id, `${f.anio}-${f.semana}`);
   const vigentes = filas.filter((f) => `${f.anio}-${f.semana}` === ultima.get(f.sala_id));
-  if (!vigentes.length) return { vacio: true, detalle: `Sin causas de quiebre cargadas para ${zona.nombre}; no se envió.` };
+  if (!vigentes.length) return { vacio: true, detalle: `Sin causas de quiebre de la semana ${semanaIso} para ${zona.nombre}; no se envió.` };
 
   const grupos = [...ultima.keys()].map((id) => {
     const skus = vigentes.filter((f) => f.sala_id === id).sort((a, b) => (b.venta_perdida ?? 0) - (a.venta_perdida ?? 0));
