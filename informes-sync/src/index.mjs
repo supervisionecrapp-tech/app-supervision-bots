@@ -134,6 +134,24 @@ async function generarResumenZonas(sb) {
   return { adjuntos: r.adjuntos, html, asunto: `${process.env.ASUNTO_PREFIJO ?? ""}Avances por zonas · Semana ${sem}` };
 }
 
+/** Informe de una zona (3 páginas) + 3 hojas de comparación contra las demás zonas. */
+async function generarComparativo(sb, zonaId) {
+  const datos = await cargarDatos(sb, { incluirVisitas: false });
+  const armadas = datos.zonas.map((z) => armarZona(datos, z.id)).filter((z) => z.salasZona.length);
+  const foco = armadas.find((z) => z.zonaId === zonaId);
+  if (!foco) throw new Error("La zona no tiene salas activas");
+  const extras = await cargarExtrasGestion(sb, datos, foco);
+  const pdf = (await aPdf([htmlComparativo(datos, foco, extras, armadas.filter((z) => z !== foco))]))[0];
+  const sem = datos.semanas[2].semana;
+  const fecha = datos.emitido.toISOString().slice(0, 10);
+  const slug = foco.zona.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_");
+  return {
+    asunto: `${foco.zona} · Informe semanal y comparativo con otras zonas · Semana ${sem}`,
+    html: `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937"><p>Adjunto el informe de ${esc(foco.zona)} (semana ${sem}) con tres hojas de comparación contra las demás zonas: indicadores, componentes RED y venta perdida NARTD.</p></div>`,
+    adjuntos: [{ filename: `informe_${slug}_comparativo_${fecha}.pdf`, content: pdf, contentType: "application/pdf" }],
+  };
+}
+
 async function guardarOEnviar({ para, cc, asunto, html, adjuntos }) {
   if (process.env.SOLO_ARCHIVO) {
     await mkdir(process.env.SOLO_ARCHIVO, { recursive: true });
@@ -170,22 +188,11 @@ const modos = {
   async comparativo() {
     const sb = supabase();
     if (!arg1) throw new Error("Falta la zona: npm run start -- comparativo <zona> [destinatarios]");
-    const datos = await cargarDatos(sb, { incluirVisitas: false });
-    const zona = datos.zonas.find((z) => z.nombre.toLowerCase() === arg1.toLowerCase());
+    const { data: zs } = await sb.from("zonas").select("id, nombre");
+    const zona = zs.find((z) => z.nombre.toLowerCase() === arg1.toLowerCase());
     if (!zona) throw new Error(`Zona desconocida: ${arg1}`);
-    const armadas = datos.zonas.map((z) => armarZona(datos, z.id)).filter((z) => z.salasZona.length);
-    const foco = armadas.find((z) => z.zonaId === zona.id);
-    const extras = await cargarExtrasGestion(sb, datos, foco);
-    const pdf = (await aPdf([htmlComparativo(datos, foco, extras, armadas.filter((z) => z !== foco))]))[0];
-    const sem = datos.semanas[2].semana;
-    const fecha = datos.emitido.toISOString().slice(0, 10);
-    const slug = foco.zona.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_");
-    await guardarOEnviar({
-      para: arg2 || REMITENTE,
-      asunto: `${foco.zona} · Informe semanal y comparativo con otras zonas · Semana ${sem}`,
-      html: `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937"><p>Adjunto el informe de ${esc(foco.zona)} (semana ${sem}) con tres hojas de comparación contra las demás zonas: indicadores, componentes RED y venta perdida NARTD.</p></div>`,
-      adjuntos: [{ filename: `informe_${slug}_comparativo_${fecha}.pdf`, content: pdf, contentType: "application/pdf" }],
-    });
+    const r = await generarComparativo(sb, zona.id);
+    await guardarOEnviar({ para: arg2 || REMITENTE, ...r });
   },
 
   async resumen_zonas() {
@@ -222,6 +229,7 @@ const modos = {
     try {
       const r = envio.informe === "incidencias" ? await generarIncidencias(sb)
         : envio.informe === "resumen_zonas" ? await generarResumenZonas(sb)
+        : envio.informe === "comparativo_zona" ? await generarComparativo(sb, envio.zona_id)
         : await generarSalasFoco(sb, envio.zona_id, envio.incluir_visitas);
       if (r.vacio) {
         // Semana sin incidencias: no hay nada que mandar, y no es un fallo.
