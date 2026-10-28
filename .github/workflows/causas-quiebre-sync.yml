@@ -2,9 +2,9 @@ name: Causas de quiebre Sync
 
 on:
   schedule:
-    # Mismos días y hora que red-sync (11:00 Chile = 15:00 UTC). Los martes
+    # Lun a vie (jueves incluido; red-sync no) a la misma hora que red-sync (11:00 Chile = 15:00 UTC). Los martes
     # además se recarga la semana anterior, que cierra el lunes.
-    - cron: "5 15 * * 1,2,3,5"
+    - cron: "5 15 * * 1,2,3,4,5"
   workflow_dispatch:
     inputs:
       semanas:
