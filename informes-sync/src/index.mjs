@@ -231,7 +231,7 @@ const modos = {
       const r = envio.informe === "incidencias" ? await generarIncidencias(sb)
         : envio.informe === "resumen_zonas" ? await generarResumenZonas(sb)
         : envio.informe === "comparativo_zona" ? await generarComparativo(sb, envio.zona_id)
-        : envio.informe === "causas_quiebre" ? await generarCausasQuiebre(sb, envio.zona_id)
+        : envio.informe === "causas_quiebre" ? await generarCausasQuiebre(sb, envio, { todas: manual || soloA.length > 0 })
         : await generarSalasFoco(sb, envio.zona_id, envio.incluir_visitas);
       if (r.vacio) {
         // Semana sin incidencias: no hay nada que mandar, y no es un fallo.
@@ -241,6 +241,7 @@ const modos = {
         return;
       }
       await guardarOEnviar({ para: para.join(", "), cc: soloA.length ? "" : copias.join(", "), ...r });
+      if (!process.env.SOLO_ARCHIVO) await r.confirmar?.();
       if (!process.env.SOLO_ARCHIVO) await log(true, r.asunto);
       console.log(`"${envio.nombre}" enviado a ${para.length} destinatario(s).`);
     } catch (e) {

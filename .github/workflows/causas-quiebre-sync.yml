@@ -24,6 +24,9 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: write
     defaults:
       run:
         working-directory: causas-quiebre-sync
@@ -68,6 +71,13 @@ jobs:
           DATAWALT_PASS: ${{ secrets.DATAWALT_PASS }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npm run sync
+
+      # Avisa al envío "Causas de quiebre" de Arica: manda el PDF solo con las
+      # salas que traen una medición nueva (si no hay ninguna, no manda nada).
+      - name: Enviar causas de quiebre nuevas
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run informes-correo.yml -f envio_id=91af864c-c4fb-4b7a-91c1-7c086d6eddae -f manual=no
 
       - name: Subir capturas de debug
         if: always()

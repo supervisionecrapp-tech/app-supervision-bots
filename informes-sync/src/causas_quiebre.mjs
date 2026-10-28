@@ -3,6 +3,7 @@
 // es lo que Cadem encontró en su última visita, y se listan los SKU con su
 // causa, días sin venta, stock y venta perdida. Sale como PDF en forma de
 // lista (casilla por SKU) y un resumen por causa en el cuerpo del correo.
+import { createHash } from "node:crypto";
 import { aPdf } from "./salas_foco.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -11,7 +12,17 @@ const fmtFecha = (f) => (f ? f.split("-").reverse().join("-") : "–");
 const sala = (n) => n.replace(/\s*\(\d+\)\s*$/, "").toLowerCase().replace(/(^|[\s\-,'.])(\p{L})/gu, (_, a, b) => a + b.toUpperCase());
 const capital = (s) => s.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_, a, b) => a + b.toUpperCase());
 
-export async function generarCausasQuiebre(sb, zonaId) {
+/** Huella del conjunto de SKU y causas de una sala: cambia cuando aparece o sale un SKU o cambia su causa, no por los montos. */
+const huella = (anio, semana, skus) =>
+  createHash("sha1").update(`${anio}-${semana}|${skus.map((r) => `${r.sku_ean}:${r.causa ?? ""}`).sort().join(",")}`).digest("hex");
+
+/**
+ * Sale solo lo nuevo: las salas cuya última visita de Cadem trae SKU/causas distintos
+ * de lo ya enviado en este envío (informes_causas_enviadas). Con `todas` manda todas las
+ * salas con datos. `confirmar()` registra lo enviado; se llama después de enviar el correo.
+ */
+export async function generarCausasQuiebre(sb, envio, { todas = false } = {}) {
+  const zonaId = envio.zona_id;
   const { data: zona, error: ez } = await sb.from("zonas").select("nombre").eq("id", zonaId).maybeSingle();
   if (ez || !zona) throw new Error(`zona: ${ez?.message ?? "no existe"}`);
   const { data: salas, error: es } = await sb.from("salas").select("id, nombre_geo").eq("zona_id", zonaId).eq("is_active", true);
@@ -37,9 +48,16 @@ export async function generarCausasQuiebre(sb, zonaId) {
     const [anio, semana] = ultima.get(id).split("-").map(Number);
     return { id, nombre: sala(porId.get(id).nombre_geo), anio, semana, skus, total: skus.reduce((s, r) => s + (r.venta_perdida ?? 0), 0) };
   }).sort((a, b) => b.total - a.total);
-  const sinDatos = salas.filter((s) => !ultima.has(s.id)).map((s) => sala(s.nombre_geo)).sort((a, b) => a.localeCompare(b, "es"));
 
-  const todos = vigentes;
+  const { data: previas, error: ep } = await sb.from("informes_causas_enviadas").select("sala_id, huella").eq("envio_id", envio.id);
+  if (ep) throw new Error(`informes_causas_enviadas: ${ep.message}`);
+  const enviada = new Map(previas.map((p) => [p.sala_id, p.huella]));
+  for (const g of grupos) g.huella = huella(g.anio, g.semana, g.skus);
+  const nuevos = todas ? grupos : grupos.filter((g) => enviada.get(g.id) !== g.huella);
+  if (!nuevos.length) return { vacio: true, detalle: `Sin salas nuevas de Cadem en ${zona.nombre}; no se envió.` };
+  grupos.splice(0, grupos.length, ...nuevos);
+  const varias = grupos.length > 1;
+  const todos = grupos.flatMap((g) => g.skus);
   const totalVp = todos.reduce((s, r) => s + (r.venta_perdida ?? 0), 0);
   const porCausa = new Map();
   for (const r of todos) {
@@ -56,7 +74,7 @@ export async function generarCausasQuiebre(sb, zonaId) {
     causas.map(([c, a]) => `<tr><td ${td()}>${esc(c)}</td><td ${td("text-align:right")}>${a.skus}</td><td ${td("text-align:right")}>${clp(a.vp)}</td></tr>`).join("")}</table>`;
   const porSala = `<table style="border-collapse:collapse;margin:0 0 12px"><tr><th ${th}>Sala</th><th ${th}>Semana</th><th ${th}>SKU</th><th ${th}>Venta perdida</th></tr>${
     grupos.map((g) => `<tr><td ${td()}>${esc(g.nombre)}</td><td ${td("text-align:right")}>${g.semana}</td><td ${td("text-align:right")}>${g.skus.length}</td><td ${td("text-align:right")}>${clp(g.total)}</td></tr>`).join("")}</table>`;
-  const bloques = grupos.map((g) => `<div style="break-before:page"></div><p style="margin:0 0 4px"><b>${esc(g.nombre)}</b> · semana ${g.semana} · ${g.skus.length} SKU · ${clp(g.total)}</p>
+  const bloques = grupos.map((g, i) => `${varias || i ? `<div style="break-before:page"></div>` : ""}<p style="margin:0 0 4px"><b>${esc(g.nombre)}</b> · semana ${g.semana} · ${g.skus.length} SKU · ${clp(g.total)}</p>
     <table style="border-collapse:collapse;width:100%"><tr><th ${th}></th><th ${th}>SKU</th><th ${th}>Causa</th><th ${th}>Días s/venta</th><th ${th}>Stock</th><th ${th}>Venta perdida</th></tr>${
     g.skus.map((r) => `<tr><td ${td("font-size:15px;line-height:1")}>☐</td><td ${td()}>${esc(r.sku_nombre || r.sku_ean)}</td><td ${td()}>${esc(r.causa || "Sin causa")}</td><td ${td("text-align:right")}>${r.dias_sin_venta ?? "–"}</td><td ${td("text-align:right")}>${r.stock ?? "–"}</td><td ${td("text-align:right")}>${clp(r.venta_perdida)}</td></tr>`).join("")}</table>`).join("");
 
@@ -64,18 +82,24 @@ export async function generarCausasQuiebre(sb, zonaId) {
   const fecha = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
   const slug = zona.nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_");
   const titulo = `${capital(zona.nombre)} · Causas de quiebre y venta perdida Cadem`;
-  const sinDatosTxt = sinDatos.length ? `<p style="color:#6b7280;font-size:12px">Sin datos de Cadem: ${esc(sinDatos.join(", "))}.</p>` : "";
   const pdfHtml = `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:A4;margin:14mm 12mm}body{font:12px/1.4 Segoe UI,Arial,sans-serif;color:#1f2937;margin:0}tr{break-inside:avoid}h1{font-size:19px;margin:0 0 2px}</style></head><body>
     <h1>${esc(titulo)}</h1>
-    <div style="color:#6b7280;margin-bottom:8px">SKU encontrados en la última visita a cada sala · semana${semanas.length > 1 ? "s" : ""} ${semanas.join(", ")} · emitido ${fmtFecha(fecha)} · <b>${todos.length} SKU</b> · <b>${clp(totalVp)}</b></div>
-    ${resumen}${porSala}${sinDatosTxt}${bloques}</body></html>`;
+    <div style="color:#6b7280;margin-bottom:8px">SKU encontrados en la última visita · semana${semanas.length > 1 ? "s" : ""} ${semanas.join(", ")} · emitido ${fmtFecha(fecha)} · <b>${todos.length} SKU</b> · <b>${clp(totalVp)}</b></div>
+    ${varias ? resumen + porSala : ""}${bloques}</body></html>`;
   const [pdf] = await aPdf([pdfHtml]);
   const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
-    <p>Adjunto el listado de causas de quiebre y venta perdida de <b>${esc(capital(zona.nombre))}</b> según Cadem, con los SKU encontrados en la última visita a cada sala (semana${semanas.length > 1 ? "s" : ""} ${semanas.join(", ")}), para ir marcándolos como lista. Total: <b>${todos.length} SKU</b>, <b>${clp(totalVp)}</b> de venta perdida.</p>
+    <p>Cadem midió ${varias ? `${grupos.length} salas nuevas` : "una sala nueva"} de <b>${esc(capital(zona.nombre))}</b>: ${esc(grupos.map((g) => g.nombre).join(", "))}. Adjunto el listado con los SKU encontrados en la última visita (semana${semanas.length > 1 ? "s" : ""} ${semanas.join(", ")}), para ir marcándolos como lista. Total: <b>${todos.length} SKU</b>, <b>${clp(totalVp)}</b> de venta perdida.</p>
     ${resumen}</div>`;
   return {
-    asunto: `${titulo} · Semana ${semanas[0]}`,
+    asunto: `${capital(zona.nombre)} · Causas de quiebre Cadem · ${grupos.map((g) => g.nombre).join(", ")} · Semana ${semanas[0]}`,
+    confirmar: async () => {
+      if (todas) return;
+      const { error } = await sb.from("informes_causas_enviadas").upsert(
+        grupos.map((g) => ({ envio_id: envio.id, sala_id: g.id, anio: g.anio, semana: g.semana, huella: g.huella, enviado_at: new Date().toISOString() })),
+        { onConflict: "envio_id,sala_id" });
+      if (error) throw new Error(`informes_causas_enviadas: ${error.message}`);
+    },
     html,
-    adjuntos: [{ filename: `causas_quiebre_${slug}_${fecha}.pdf`, content: pdf, contentType: "application/pdf" }],
+    adjuntos: [{ filename: `causas_quiebre_${slug}_${fecha}${varias ? "" : "_" + grupos[0].nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "_")}.pdf`, content: pdf, contentType: "application/pdf" }],
   };
 }
