@@ -95,9 +95,13 @@ export async function generarCausasQuiebre(sb, envio, { todas = false } = {}) {
     <div style="color:#6b7280;margin-bottom:8px">SKU encontrados en la última visita · semana${semanas.length > 1 ? "s" : ""} ${semanas.join(", ")} · emitido ${fmtFecha(fecha)} · <b>${todos.length} SKU</b> · <b>${clp(totalVp)}</b></div>
     ${varias ? resumen + porSala : ""}${bloques}</body></html>`;
   const [pdf] = await aPdf([pdfHtml]);
+  const ultimaMed = grupos.length === 1 ? `la última medición de <b>${esc(grupos[0].nombre)}</b>` : `la última medición de <b>${esc(grupos.map((g) => g.nombre).join(", "))}</b>`;
   const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
-    <p>Cadem midió ${varias ? `${grupos.length} salas nuevas` : "una sala nueva"} de <b>${esc(capital(zona.nombre))}</b>: ${esc(grupos.map((g) => g.nombre).join(", "))}. Adjunto el listado con los SKU encontrados en la última visita (semana${semanas.length > 1 ? "s" : ""} ${semanas.join(", ")}), para ir marcándolos como lista. Total: <b>${todos.length} SKU</b>, <b>${clp(totalVp)}</b> de venta perdida.</p>
-    ${resumen}</div>`;
+    <p>Howard,</p>
+    <p>Te dejo el listado de causas de quiebre en ${ultimaMed} (semana ${semanas.join(", ")}), con ${todos.length} SKU y ${clp(totalVp)} de venta perdida. El desglose por causal es el siguiente:</p>
+    ${resumen}
+    <p>El detalle por SKU va en el PDF adjunto${varias ? ", una hoja por sala" : ""}.</p>
+    <p>Saludos.</p></div>`;
   return {
     asunto: `${capital(zona.nombre)} · Causas de quiebre Cadem · ${grupos.map((g) => g.nombre).join(", ")} · Semana ${semanas[0]}`,
     confirmar: async () => {
