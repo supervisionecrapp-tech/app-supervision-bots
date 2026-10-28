@@ -101,10 +101,12 @@ export async function generarCausasQuiebre(sb, envio, { todas = false } = {}) {
     const filas = [...por].sort((a, b) => b[1].vp - a[1].vp).map(([c, a]) => `<div style="padding:2px 0">${esc(c)} (${a.n}) = ${clp(a.vp)}</div>`).join("");
     return `<div style="border:1px solid #d1d5db;border-radius:6px;padding:8px 12px;margin:8px 0;max-width:460px"><div style="font-weight:700;padding-bottom:4px">${esc(g.nombre)} = ${clp(g.total)}</div>${filas}</div>`;
   }).join("");
-  const ultimaMed = grupos.length === 1 ? `la última medición de <b>${esc(grupos[0].nombre)}</b>` : `la última medición de <b>${esc(grupos.map((g) => g.nombre).join(", "))}</b>`;
+  const nombresSalas = grupos.map((g) => `<b>${esc(g.nombre)}</b>`);
+  const listaSalas = nombresSalas.length > 1 ? `${nombresSalas.slice(0, -1).join(", ")} y ${nombresSalas.at(-1)}` : nombresSalas[0];
+  const ultimaMed = varias ? `las últimas mediciones de ${listaSalas}` : `la última medición de ${listaSalas}`;
   const html = `<div style="font:14px/1.5 Segoe UI,Arial,sans-serif;color:#1f2937">
     <p>Howard,</p>
-    <p>Te dejo el listado de causas de quiebre en ${ultimaMed} (semana ${semanas.join(", ")}), con ${todos.length} SKU y ${clp(totalVp)} de venta perdida. El desglose por causal es el siguiente:</p>
+    <p>Te dejo el listado de causas de quiebre en ${ultimaMed} (semana ${semanas.join(", ")}), con ${todos.length} SKU y ${clp(totalVp)} de venta perdida en total. El desglose por causal es el siguiente:</p>
     ${recuadros}
     <p>El detalle por SKU va en el PDF adjunto${varias ? ", una hoja por sala" : ""}.</p>
     <p>Saludos.</p></div>`;
