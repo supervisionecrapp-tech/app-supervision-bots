@@ -1,0 +1,39 @@
+name: Presentismo WM-SMU por correo
+
+# Lo dispara Supabase (pg_cron) los lunes a las 13:00 y 14:00 UTC con
+# verificar_hora=10: solo manda la corrida en que en Chile son las 10:00
+# (el horario de verano mueve la hora UTC). A mano sirve para pruebas:
+# con solo_a manda solo a esos correos, sin copia, y marca el asunto [Prueba].
+on:
+  workflow_dispatch:
+    inputs:
+      verificar_hora:
+        description: "Hora de Chile en que debe salir (vacío = sale igual)"
+        default: ""
+      solo_a:
+        description: "Prueba: manda solo a estos correos (coma), sin CC"
+        default: ""
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: presentismo-wm-smu-correo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install openpyxl
+
+      - name: Armar y enviar
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VERIFICAR_HORA: ${{ inputs.verificar_hora }}
+          SOLO_A: ${{ inputs.solo_a }}
+        run: python informe.py
