@@ -4,6 +4,7 @@
 //   npm run start -- salas_foco <zona|todas> <destinatarios>   prueba suelta
 //   npm run start -- comparativo <zona> [destinatarios]   informe de la zona + 3 hojas
 //                                                (otras zonas) de comparación
+//   npm run start -- por_supervisor <zona> [destinatarios]   una hoja por supervisor de la zona
 //   npm run start -- resumen_zonas <destinatarios>   los informes de todas las zonas en un
 //                                                    solo correo para Mauro, con el uso de la app de Talca
 //   npm run start -- prueba <destinatarios>
@@ -21,6 +22,7 @@ import { htmlEjecutivo, paginasPdf } from "./ejecutivo_html.mjs";
 import { htmlComparativo } from "./comparativo_html.mjs";
 import { generarIncidencias } from "./incidencias.mjs";
 import { generarCausasQuiebre } from "./causas_quiebre.mjs";
+import { generarPorSupervisor } from "./por_supervisor.mjs";
 
 // Por defecto sale el informe ejecutivo (3 páginas, para gerencia). FORMATO=detallado
 // arma el informe de gestión completo (fichas por supervisor, anexos).
@@ -196,6 +198,15 @@ const modos = {
     await guardarOEnviar({ para: arg2 || REMITENTE, ...r });
   },
 
+  async por_supervisor() {
+    const sb = supabase();
+    if (!arg1) throw new Error("Falta la zona: npm run start -- por_supervisor <zona> [destinatarios]");
+    const { data: zs } = await sb.from("zonas").select("id, nombre");
+    const zona = zs.find((z) => z.nombre.toLowerCase() === arg1.toLowerCase());
+    if (!zona) throw new Error(`Zona desconocida: ${arg1}`);
+    await guardarOEnviar({ para: arg2 || REMITENTE, ...(await generarPorSupervisor(sb, zona.id)) });
+  },
+
   async resumen_zonas() {
     const r = await generarResumenZonas(supabase());
     await guardarOEnviar({ para: arg1 || REMITENTE, ...r });
@@ -231,6 +242,7 @@ const modos = {
       const r = envio.informe === "incidencias" ? await generarIncidencias(sb)
         : envio.informe === "resumen_zonas" ? await generarResumenZonas(sb)
         : envio.informe === "comparativo_zona" ? await generarComparativo(sb, envio.zona_id)
+        : envio.informe === "por_supervisor" ? await generarPorSupervisor(sb, envio.zona_id)
         : envio.informe === "causas_quiebre" ? await generarCausasQuiebre(sb, envio, { todas: manual || soloA.length > 0 })
         : await generarSalasFoco(sb, envio.zona_id, envio.incluir_visitas);
       if (r.vacio) {
