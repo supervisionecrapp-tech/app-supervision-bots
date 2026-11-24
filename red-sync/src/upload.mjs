@@ -2,6 +2,10 @@ import XLSX from "xlsx";
 import { createClient } from "@supabase/supabase-js";
 import { RED_COLUMNS, RED_TABLE } from "./redColumns.mjs";
 
+const ALIAS_SALA = [
+  ["1409832-L0009-La Conchagua - Santa Cruz, Amada Munoz", "1409832-L0009-La Colchagua - Santa Cruz, Amada Munoz"],
+];
+
 // Misma lógica que la sección "Red" de admin-panel.html, portada a Node
 // para poder correr sin navegador ni usuario logueado — usa la
 // service_role key así que no pasa por RLS (equivalente a is_admin()).
@@ -38,6 +42,11 @@ export async function uploadRedFile({ filePath, categoria, anio, semana, supabas
   const salaByKey = new Map();
   for (const s of salas) {
     if (s.nombre_cadem) salaByKey.set(`${s.sap}-${s.nombre_cadem}`, s.id);
+  }
+  // El portal escribe esta sala distinto según el reporte: "Colchagua" en
+  // NARTD (así está en la maestra) y "Conchagua" en ABI/VSR.
+  for (const [alias, oficial] of ALIAS_SALA) {
+    if (salaByKey.has(oficial)) salaByKey.set(alias, salaByKey.get(oficial));
   }
 
   const cols = RED_COLUMNS[categoria];
