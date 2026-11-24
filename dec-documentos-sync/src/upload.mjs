@@ -155,7 +155,7 @@ async function buildResolver(supabase) {
     selectAll(supabase, "profiles", "id, full_name"),
     selectAll(supabase, "zonas", "id, nombre"),
     selectAll(supabase, "turnos_colaboradores", "rut, nombre, grupo_gv, cargo, activo"),
-    selectAll(supabase, "grupos_gv", "id, nombre"),
+    selectAll(supabase, "grupos_gv", "id, nombre, zona_id"),
   ]);
 
   const salaById = new Map(salas.map((s) => [s.id, s]));
@@ -173,6 +173,11 @@ async function buildResolver(supabase) {
     }
   }
   const grupoGvIdByNombre = new Map(gruposGv.map((g) => [g.nombre, g.id]));
+  // Grupos sin salas ni supervisor (ej. CD TALCA - RG) llevan la zona puesta a
+  // mano en grupos_gv.zona_id: sus documentos salen en esa zona, sin supervisor.
+  const zonaIdByGrupoNombre = new Map(gruposGv.filter((g) => g.zona_id).map((g) => [g.nombre, g.zona_id]));
+  const zonaDe = (sala, turno) =>
+    zonaNombreById.get(sala?.zona_id ?? zonaIdByGrupoNombre.get(turno?.grupo_gv)) ?? null;
 
   // Tier 1: mejor asignación vigente hoy por RUT (misma lógica que
   // resolverAsignacion() en supabase/functions/cobertura-ausencias-sync/index.ts:
@@ -212,7 +217,7 @@ async function buildResolver(supabase) {
         nombre: asignacion.nombre_completo,
         cargo: asignacion.cargo,
         supervisorNombre: salaRef ? profileNombreById.get(salaRef.supervisor_id) ?? null : null,
-        zona: salaRef ? zonaNombreById.get(salaRef.zona_id) ?? null : null,
+        zona: zonaDe(salaRef, turno),
         sap: sala ? sala.sap : null,
       };
     }
@@ -224,7 +229,7 @@ async function buildResolver(supabase) {
         nombre: turno.nombre,
         cargo: turno.cargo,
         supervisorNombre: sala ? profileNombreById.get(sala.supervisor_id) ?? null : null,
-        zona: sala ? zonaNombreById.get(sala.zona_id) ?? null : null,
+        zona: zonaDe(sala, turno),
         sap: null, // sin sala propia — no entra a documentos_pendientes_salas
       };
     }
