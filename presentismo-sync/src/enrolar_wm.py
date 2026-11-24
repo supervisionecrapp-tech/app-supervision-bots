@@ -69,6 +69,9 @@ def leer_roster(supabase) -> list[dict]:
     return [p for p in gente if p["grupo_gv"] in grupos]
 
 
+MAX_SIN_AVANCE_S = 240
+
+
 def armar_excel(gente: list[dict], salida: Path) -> list[str]:
     """Llena la plantilla y devuelve los avisos (filas que el portal va a
     rechazar por las reglas de la plantilla: mínimo 3 letras, solo letras)."""
@@ -193,9 +196,10 @@ def subir_excel(page, captura, gente: list[dict], archivo: Path, resultado: dict
         if marca != ultimo:
             print(f"  avance: {marca}")
             ultimo, desde = marca, time.time()
-        elif time.time() - desde > 90:
+        # Una tanda de 100 tarda ~81 s (24/11): con 90 se abandonaban tandas sanas.
+        elif time.time() - desde > MAX_SIN_AVANCE_S:
             captura(page, "13b_colgado")
-            print(f"  SIN AVANCE 90s en: {marca}")
+            print(f"  SIN AVANCE {MAX_SIN_AVANCE_S}s en: {marca}")
             filas = page.evaluate(
                 "[...document.querySelectorAll('table tbody tr')].slice(-6).map(tr => [...tr.cells].map(c => c.innerText.trim()).join(' | '))"
             )

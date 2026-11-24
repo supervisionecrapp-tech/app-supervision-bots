@@ -23,7 +23,8 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20: hasta ~10 tandas de 100 a ~81 s cada una, mas el setup.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: presentismo-sync
