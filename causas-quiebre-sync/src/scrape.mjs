@@ -195,11 +195,14 @@ async function selectWeek(frame, page, { anio, mes, semana }, downloadDir, waitM
   await expandirSiHaceFalta(yearItem, page, waitMultiplier);
 
   const monthItem = frame.locator(`.slicerItemContainer[title="${mes}"][aria-level="2"]`);
+  // El árbol es virtualizado: con 11+ meses, el último no está en el DOM
+  // hasta scrollear (desde noviembre 2026 el bot no encontraba el mes 11).
+  await scrollItemIntoView(page, monthItem, `el mes ${mes}`, waitMultiplier);
   await expandirSiHaceFalta(monthItem, page, waitMultiplier);
   await debugShot(page, downloadDir, "03a-filtro-mes-expandido");
 
   const weekItem = frame.locator(`.slicerItemContainer[title="${semana}"][aria-level="3"]`);
-  await scrollWeekIntoView(page, weekItem, waitMultiplier);
+  await scrollItemIntoView(page, weekItem, `la semana ${semana}`, waitMultiplier);
   await weekItem.locator(".slicerCheckbox").click();
   await page.waitForTimeout(1500 * waitMultiplier);
   await debugShot(page, downloadDir, "03b-filtro-semana");
@@ -221,16 +224,16 @@ async function expandirSiHaceFalta(item, page, waitMultiplier) {
   await page.waitForTimeout(500 * waitMultiplier);
 }
 
-async function scrollWeekIntoView(page, weekItem, waitMultiplier = 1) {
-  if (await weekItem.isVisible({ timeout: 500 }).catch(() => false)) return;
+async function scrollItemIntoView(page, item, nombre, waitMultiplier = 1) {
+  if (await item.isVisible({ timeout: 500 }).catch(() => false)) return;
   const scrollPoint = { x: 1750, y: 400 };
   for (let intento = 0; intento < 12; intento++) {
-    if (await weekItem.isVisible({ timeout: 300 }).catch(() => false)) return;
+    if (await item.isVisible({ timeout: 300 }).catch(() => false)) return;
     await page.mouse.move(scrollPoint.x, scrollPoint.y);
     await page.mouse.wheel(0, 120);
     await page.waitForTimeout(200 * waitMultiplier);
   }
-  console.warn("No se pudo scrollear hasta encontrar la semana en el popup.");
+  console.warn(`No se pudo scrollear hasta encontrar ${nombre} en el popup.`);
 }
 
 async function checkboxState(checkbox) {
