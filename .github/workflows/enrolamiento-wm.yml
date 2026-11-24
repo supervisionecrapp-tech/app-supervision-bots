@@ -34,7 +34,19 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - run: scrapling install
-      - run: python -m camoufox fetch
+      # Con GITHUB_TOKEN camoufox consulta la API de GitHub autenticado: sin el,
+      # el limite anonimo es por IP y el runner la comparte (403 rate limit).
+      - name: Bajar el navegador de Camoufox
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            python -m camoufox fetch && exit 0
+            echo "camoufox fetch fallo (intento $i de 3)"
+            if [ "$i" -lt 3 ]; then sleep $((i * 10)); fi
+          done
+          exit 1
       - name: Instalar xvfb y xdotool
         run: sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=20 xvfb xdotool
         timeout-minutes: 4

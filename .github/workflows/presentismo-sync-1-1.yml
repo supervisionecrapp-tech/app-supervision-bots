@@ -95,8 +95,20 @@ jobs:
 
       # Baja el build de Firefox de Camoufox (el paquete de pip, que ya
       # instaló requirements.txt, no lo incluye).
-      - run: python -m camoufox fetch
+      # Con GITHUB_TOKEN camoufox consulta la API de GitHub autenticado: sin el,
+      # el limite anonimo es por IP y el runner la comparte (403 rate limit).
+      - name: Bajar el navegador de Camoufox
         if: steps.chequeo.outputs.correr == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            python -m camoufox fetch && exit 0
+            echo "camoufox fetch fallo (intento $i de 3)"
+            if [ "$i" -lt 3 ]; then sleep $((i * 10)); fi
+          done
+          exit 1
 
       # El scrape corre HEADFUL (headless=False) porque Cloudflare detecta
       # Chrome headless. En Linux eso necesita un display: xvfb se lo da
