@@ -185,10 +185,12 @@ async function buildResolver(supabase) {
   // fecha_inicio más reciente si hay varias simultáneas).
   const hoy = todayIso();
   const mejorAsignacionPorRut = new Map();
+  const asignacionesPorRut = new Map();
   for (const a of asignaciones) {
     if (a.fecha_inicio > hoy) continue;
     if (a.fecha_fin != null && a.fecha_fin < hoy) continue;
     const rutNorm = normalizeRut(a.rut);
+    asignacionesPorRut.set(rutNorm, [...(asignacionesPorRut.get(rutNorm) ?? []), a]);
     const actual = mejorAsignacionPorRut.get(rutNorm);
     if (!actual || a.fecha_inicio > actual.fecha_inicio) mejorAsignacionPorRut.set(rutNorm, a);
   }
@@ -204,10 +206,25 @@ async function buildResolver(supabase) {
   function resolve(rutRaw) {
     const rutNorm = normalizeRut(rutRaw);
 
-    const asignacion = mejorAsignacionPorRut.get(rutNorm);
     const turno = turnosPorRut.get(rutNorm);
+    const grupoGvId = turno ? grupoGvIdByNombre.get(turno.grupo_gv) : null;
+    // Sala de otro grupo que el que la persona tiene en GeoVictoria: es un error
+    // de ingreso en Cobertura y manda GV (sólo si ese grupo es uno con salas).
+    const chocaConGv = (s) =>
+      !!s?.grupo_gv_id && salaByGrupoGvId.has(grupoGvId) && s.grupo_gv_id !== grupoGvId;
+    let asignacion = mejorAsignacionPorRut.get(rutNorm);
+    if (asignacion && chocaConGv(salaById.get(asignacion.sala_id))) {
+      // Quien hace ruta puede tener otra sala vigente que sí es de su grupo.
+      asignacion = asignacionesPorRut.get(rutNorm)
+        .filter((a) => salaById.get(a.sala_id)?.grupo_gv_id === grupoGvId)
+        .sort((a, b) => (a.fecha_inicio < b.fecha_inicio ? 1 : -1))[0] ?? asignacion;
+    }
     if (asignacion) {
-      const sala = salaById.get(asignacion.sala_id);
+      let sala = salaById.get(asignacion.sala_id);
+      if (chocaConGv(sala)) {
+        console.warn("Asignación de Cobertura con grupo distinto al de GeoVictoria: manda el grupo de GV.");
+        sala = null;
+      }
       // Una asignación vigente puede venir sin sala (ej. la nueva de Cobertura
       // todavía sin completar): en ese caso el supervisor y la zona salen del
       // grupo de GeoVictoria, igual que en el nivel 2, en vez de quedar vacíos.
