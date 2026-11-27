@@ -16,6 +16,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--desde") out.desde = argv[++i];
     if (argv[i] === "--hasta") out.hasta = argv[++i];
+    if (argv[i] === "--solo-horas") out.soloHoras = true;
   }
   return out;
 }
@@ -34,8 +35,9 @@ async function main() {
   const startedAt = new Date().toISOString();
 
   try {
-    const result = await sync(supabase, { desde, hasta });
-    console.log(`Listo: ${result.ausencias} ausencias (${result.activos} activos en GV, ${result.sinAsignacion} sin sala/cargo asignado en Dotación, ${result.borradas} reconciliadas/borradas).`);
+    const result = await sync(supabase, { desde, hasta, soloHoras: !!args.soloHoras });
+    if (args.soloHoras) console.log(`Listo: horas_turno completadas en ${result.ausencias} ausencias existentes.`);
+    else console.log(`Listo: ${result.ausencias} ausencias (${result.activos} activos en GV, ${result.sinAsignacion} sin sala/cargo asignado en Dotación, ${result.borradas} reconciliadas/borradas).`);
     await logRun(supabase, { bot: "cobertura-ausencias-sync-backfill", startedAt, status: "success", filasCargadas: result.ausencias });
   } catch (err) {
     await logRun(supabase, {

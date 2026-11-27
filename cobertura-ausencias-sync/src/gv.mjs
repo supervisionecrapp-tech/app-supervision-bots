@@ -148,12 +148,38 @@ export function gvUsersToFilas(users) {
         fecha: isoFromYyyyMmDd((dia.Date ?? "").slice(0, 8)),
         absent: dia.Absent === "True",
         shift_begins: shifts[0].Begins,
+        horas_turno: horasTurno(shifts),
         timeoff_type: timeOffs[0]?.TimeOffTypeDescription ?? null,
         primer_ingreso_gmt0: primerIngreso?.Date ?? null,
       });
     }
   }
   return filas;
+}
+
+function msDeFechaGv(s) {
+  return Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12));
+}
+
+// Horas del turno programado ese día = fin − inicio − colación, sumando
+// todos los tramos (no se vieron turnos partidos, pero no cuesta cubrirlos).
+// Los días libres vienen como un turno Type="NotWorking" de 00:00 a 00:00
+// del día siguiente: no suman. Verificado contra datos reales (27/11/2026):
+// en días trabajados sin atraso, este cálculo cuadra con WorkedHours de GV.
+// No se usa NonWorkedHours porque GV lo deja en 00:00 los días Absent.
+// null = el día no trae ningún turno de trabajo.
+export function horasTurno(shifts) {
+  let horas = 0;
+  let hayTurno = false;
+  for (const s of shifts ?? []) {
+    if (s.Type === "NotWorking" || !s.Begins || !s.Ends) continue;
+    const bruto = (msDeFechaGv(s.Ends) - msDeFechaGv(s.Begins)) / 3600000;
+    const colacion = s.BreakType === "NoLunch" ? 0 : (Number(s.BreakMinutes) || 0) / 60;
+    if (!(bruto > 0)) continue;
+    horas += Math.max(0, bruto - colacion);
+    hayTurno = true;
+  }
+  return hayTurno ? Math.round(horas * 100) / 100 : null;
 }
 
 export function isoFromYyyyMmDd(s) {

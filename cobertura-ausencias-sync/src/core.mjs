@@ -54,7 +54,30 @@ function resolverAsignacion(asignacionesPorRut, rut, fechaISO) {
  * volver a correr el sync (programado o el botón "Actualizar") no debe
  * pisarlos. Solo se refrescan rut/nombre/sala/cargo/turno programado.
  */
-export async function sync(supabase, { desde, hasta }) {
+/** Modo backfill.mjs --solo-horas: para fechas viejas (fuera de la ventana
+ * de 45 días del sync programado) sólo completa horas_turno en las filas que
+ * ya existen. No inserta, no borra (la reconciliación cambiaría meses ya
+ * cerrados) y no toca cargo/sala (GV devuelve el cargo ACTUAL de la persona,
+ * que puede no ser el que tenía esa fecha). */
+async function actualizarSoloHoras(supabase, filas) {
+  const conHoras = filas.filter((f) => f.horas_turno != null);
+  let actualizadas = 0;
+  for (let i = 0; i < conHoras.length; i += 20) {
+    const tanda = conHoras.slice(i, i + 20);
+    const res = await Promise.all(tanda.map((f) => supabase
+      .from("cbtrs_ausencias")
+      .update({ horas_turno: f.horas_turno }, { count: "exact" })
+      .eq("rut", f.rut)
+      .eq("fecha", f.fecha)));
+    for (const r of res) {
+      if (r.error) throw new Error(r.error.message);
+      actualizadas += r.count ?? 0;
+    }
+  }
+  return { activos: null, ausencias: actualizadas, sinAsignacion: 0, borradas: 0 };
+}
+
+export async function sync(supabase, { desde, hasta, soloHoras = false }) {
   const gvKey = requireEnv("GEOVICTORIA_KEY");
   const gvSecret = requireEnv("GEOVICTORIA_SECRET");
 
@@ -107,9 +130,14 @@ export async function sync(supabase, { desde, hasta }) {
       cargo: f.cargo ?? asignacion?.cargo ?? null,
       grupo_gv: f.grupo_gv ?? null,
       turno_inicio_programado: f.shift_begins ?? null,
+      // Lo que descuenta la cobertura. Se refresca en cada corrida, así un
+      // cambio de turno en GV dentro de la ventana corrige las horas solo.
+      horas_turno: f.horas_turno ?? null,
       origen: "geovictoria",
     };
   });
+
+  if (soloHoras) return actualizarSoloHoras(supabase, filasParaGuardar);
 
   for (let i = 0; i < filasParaGuardar.length; i += UPSERT_BATCH) {
     const { error } = await supabase

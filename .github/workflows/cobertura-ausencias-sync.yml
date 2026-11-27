@@ -7,7 +7,22 @@ on:
     # al día: 8:00 y 18:00 Chile = 12:00 y 22:00 UTC (Chile continental es
     # UTC-4 fijo, mismo criterio que asistencia-sync.yml).
     - cron: "0 12,22 * * *"
-  workflow_dispatch: {}
+  # Sin inputs = la misma corrida programada (45 días). Con desde/hasta
+  # (YYYYMMDD) corre backfill.mjs para ese rango; solo_horas=true sólo
+  # completa horas_turno en las ausencias que ya existen (sin insertar ni
+  # borrar), para meses fuera de la ventana de 45 días.
+  workflow_dispatch:
+    inputs:
+      desde:
+        description: "Backfill desde (YYYYMMDD). Vacío = corrida normal."
+        required: false
+      hasta:
+        description: "Backfill hasta (YYYYMMDD)."
+        required: false
+      solo_horas:
+        description: "Sólo completar horas_turno en filas existentes."
+        type: boolean
+        default: false
 
 jobs:
   sync:
@@ -26,8 +41,20 @@ jobs:
       - run: npm install
 
       - name: Sync
+        if: ${{ !inputs.desde }}
         env:
           GEOVICTORIA_KEY: ${{ secrets.GEOVICTORIA_KEY }}
           GEOVICTORIA_SECRET: ${{ secrets.GEOVICTORIA_SECRET }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: npm run sync
+
+      - name: Backfill
+        if: ${{ inputs.desde }}
+        env:
+          GEOVICTORIA_KEY: ${{ secrets.GEOVICTORIA_KEY }}
+          GEOVICTORIA_SECRET: ${{ secrets.GEOVICTORIA_SECRET }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DESDE: ${{ inputs.desde }}
+          HASTA: ${{ inputs.hasta }}
+          SOLO_HORAS: ${{ inputs.solo_horas }}
+        run: node src/backfill.mjs --desde "$DESDE" --hasta "$HASTA" $([ "$SOLO_HORAS" = "true" ] && echo --solo-horas)
